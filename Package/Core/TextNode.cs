@@ -5,6 +5,9 @@ using System;
 #if NETCODE
 using Unity.Netcode;
 #endif
+#if MIRROR
+using Mirror;
+#endif
 
 namespace PicoShot.Localization
 {
@@ -59,7 +62,7 @@ namespace PicoShot.Localization
 
             return output;
         }
-        
+
         public TextNode(string value)
         {
             Value = value;
@@ -207,7 +210,7 @@ namespace PicoShot.Localization
 
             if (string.IsNullOrEmpty(Argument))
                 return $"<{Tag}>";
-            
+
             return $"<{Tag}={Argument}>";
         }
 
@@ -237,4 +240,61 @@ namespace PicoShot.Localization
         }
 #endif
     }
+
+#if MIRROR
+    public static class TextNodeMirrorSerializer
+    {
+        public static void WriteRichModifier(this NetworkWriter writer, RichModifier value)
+        {
+            writer.WriteString(value.Tag);
+            writer.WriteString(value.Argument);
+        }
+
+        public static RichModifier ReadRichModifier(this NetworkReader reader)
+        {
+            return new RichModifier()
+            {
+                Tag = reader.ReadString(),
+                Argument = reader.ReadString()
+            };
+        }
+
+        public static void WriteTextNode(this NetworkWriter writer, TextNode value)
+        {
+            writer.WriteString(value.Value);
+            writer.WriteByte((byte)value.Type);
+
+            writer.WriteInt(value.Nodes?.Length ?? 0);
+            if (value.Nodes != null)
+                for (int i = 0; i < value.Nodes.Length; i++)
+                    writer.WriteTextNode(value.Nodes[i]);
+
+            writer.WriteInt(value.RichModifiers?.Length ?? 0);
+            if (value.RichModifiers != null)
+                for (int i = 0; i < value.RichModifiers.Length; i++)
+                    writer.WriteRichModifier(value.RichModifiers[i]);
+        }
+
+        public static TextNode ReadTextNode(this NetworkReader reader)
+        {
+            var node = new TextNode()
+            {
+                Value = reader.ReadString(),
+                Type = (TextNode.NodeType)reader.ReadByte()
+            };
+
+            int nodeCount = reader.ReadInt();
+            node.Nodes = new TextNode[nodeCount];
+            for (int i = 0; i < nodeCount; i++)
+                node.Nodes[i] = reader.ReadTextNode();
+
+            int modifierCount = reader.ReadInt();
+            node.RichModifiers = new RichModifier[modifierCount];
+            for (int i = 0; i < modifierCount; i++)
+                node.RichModifiers[i] = reader.ReadRichModifier();
+
+            return node;
+        }
+    }
+#endif
 }

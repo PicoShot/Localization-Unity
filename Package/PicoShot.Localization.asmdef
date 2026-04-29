@@ -3,7 +3,8 @@
   "rootNamespace": "PicoShot.Localization",
   "references": [
     "Unity.TextMeshPro",
-    "Unity.Netcode.Runtime"
+    "Unity.Netcode.Runtime",
+    "Mirror"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
