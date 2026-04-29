@@ -2,11 +2,12 @@
   "name": "PicoShot.Localization",
   "rootNamespace": "PicoShot.Localization",
   "references": [
-    "Unity.TextMeshPro"
+    "Unity.TextMeshPro",
+    "Unity.Netcode.Runtime"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],
-  "allowUnsafeCode": false,
+  "allowUnsafeCode": true,
   "overrideReferences": false,
   "precompiledReferences": [],
   "autoReferenced": true,

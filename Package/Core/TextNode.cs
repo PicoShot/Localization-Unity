@@ -1,8 +1,10 @@
 //#define NETCODE
 
-using UnityEngine;
-using Unity.VisualScripting;
 using System;
+
+#if NETCODE
+using Unity.Netcode;
+#endif
 
 namespace PicoShot.Localization
 {
@@ -30,7 +32,7 @@ namespace PicoShot.Localization
     /// If your project uses Netcode, add "NETCODE" to your
     /// Scripting Define Symbols.
     /// </summary>
-    public struct TextNode 
+    public struct TextNode
 #if NETCODE
         : INetworkSerializable
 #endif
@@ -40,43 +42,7 @@ namespace PicoShot.Localization
         public TextNode[] Nodes;
         public RichModifier[] RichModifiers;
 
-        public TextNode(string value)
-        {
-            Value = value;
-            Type = NodeType.PlainText;
-            Nodes = Array.Empty<TextNode>();
-            RichModifiers = Array.Empty<RichModifier>();
-        }
-
-        public static TextNode Text(string text, params TextNode[] arguments)
-        {
-            return new TextNode()
-            {
-                Value = text,
-                Type = NodeType.PlainText,
-                Nodes = arguments
-            };
-        }
-        public static TextNode Localized(string translationKeyName, params TextNode[] arguments)
-        {
-            return new TextNode()
-            {
-                Value = translationKeyName,
-                Type = NodeType.LocalizedText,
-                Nodes = arguments
-            };
-        }
-        public static TextNode Formatted(string format, params TextNode[] arguments)
-        {
-            return new TextNode()
-            {
-                Value = format,
-                Type = NodeType.FormattedText,
-                Nodes = arguments
-            };
-        }
-
-        private string ApplyModifiers(in string text)
+        private string applyModifiers(in string text)
         {
             if (RichModifiers == null || RichModifiers.Length == 0)
                 return text;
@@ -93,22 +59,80 @@ namespace PicoShot.Localization
 
             return output;
         }
-
+        
+        public TextNode(string value)
+        {
+            Value = value;
+            Type = NodeType.PlainText;
+            Nodes = Array.Empty<TextNode>();
+            RichModifiers = Array.Empty<RichModifier>();
+        }
         public override string ToString()
         {
             if (Type == NodeType.PlainText)
-                return ApplyModifiers(Value);
+                return applyModifiers(Value);
+
+            Nodes ??= Array.Empty<TextNode>();
 
             var arguments = new string[Nodes.Length];
             for (int i = 0; i < Nodes.Length; i++)
                 arguments[i] = Nodes[i].ToString();
 
-            return ApplyModifiers(Type switch
+            return applyModifiers(Type switch
             {
                 NodeType.LocalizedText => LocalizationManager.GetText(Value, arguments),
                 NodeType.FormattedText => string.Format(Value, arguments),
                 _ => throw new NotImplementedException()
             });
+        }
+
+        public static TextNode Text(string text)
+        {
+            return new TextNode()
+            {
+                Value = text,
+                Type = NodeType.PlainText,
+                Nodes = Array.Empty<TextNode>()
+            };
+        }
+        public static TextNode Localized(string translationKeyName, params TextNode[] arguments)
+        {
+            arguments ??= Array.Empty<TextNode>();
+
+            return new TextNode()
+            {
+                Value = translationKeyName,
+                Type = NodeType.LocalizedText,
+                Nodes = arguments
+            };
+        }
+        public static TextNode Formatted(string format, params TextNode[] arguments)
+        {
+            arguments ??= Array.Empty<TextNode>();
+
+            return new TextNode()
+            {
+                Value = format,
+                Type = NodeType.FormattedText,
+                Nodes = arguments
+            };
+        }
+        public static TextNode Combine(params TextNode[] others)
+        {
+            if (others == null || others.Length < 1)
+                return default;
+
+            var combined = new TextNode()
+            {
+                Type = NodeType.FormattedText,
+                Value = string.Empty,
+                Nodes = others
+            };
+
+            for (int i = 0; i < others.Length; i++)
+                combined.Value += "{" + i + "}";
+
+            return combined;
         }
 
         public TextNode AddModifier(RichModifier modifier)
@@ -162,32 +186,44 @@ namespace PicoShot.Localization
         }
     }
 
-    public struct RichModifier 
+    public struct RichModifier
 #if NETCODE
     : INetworkSerializable
 #endif
     {
         public string Tag;
-        public string Parameter;
+        public string Argument;
 
-        public RichModifier(string tag, string parameter = null)
+        public RichModifier(string tag, string argument = null)
         {
             Tag = tag;
-            Parameter = parameter ?? string.Empty;
+            Argument = argument ?? string.Empty;
         }
 
         public string Begin()
         {
-            return $"<{Tag}{(!string.IsNullOrEmpty(Parameter) ? $"={Parameter}" : string.Empty)}>";
+            if (string.IsNullOrEmpty(Tag))
+                return string.Empty;
+
+            if (string.IsNullOrEmpty(Argument))
+                return $"<{Tag}>";
+            
+            return $"<{Tag}={Argument}>";
         }
 
         public string End()
         {
+            if (string.IsNullOrEmpty(Tag))
+                return string.Empty;
+
             return $"</{Tag}>";
         }
 
         public string Apply(string text)
         {
+            if (string.IsNullOrEmpty(Tag))
+                return text;
+
             return $"{Begin()}{text}{End()}";
         }
 #if NETCODE
@@ -196,79 +232,9 @@ namespace PicoShot.Localization
             Tag ??= string.Empty;
             serializer.SerializeValue(ref Tag);
 
-            Parameter ??= string.Empty;
-            serializer.SerializeValue(ref Parameter);
+            Argument ??= string.Empty;
+            serializer.SerializeValue(ref Argument);
         }
 #endif
-    }
-
-    public static class RichExtenstions
-    {
-        static string ToHexString(this Color color)
-        {
-            return ((byte)(color.r * 255f)).ToString("X2") + ((byte)(color.g * 255f)).ToString("X2") + ((byte)(color.b * 255f)).ToString("X2") + ((byte)(color.a * 255f)).ToString("X2");
-        }
-
-        public static TextNode BoldModifier(this TextNode node)
-        {
-            return node.AddModifier(new RichModifier("b"));
-        }
-
-        public static TextNode ItalicModifier(this TextNode node)
-        {
-            return node.AddModifier(new RichModifier("i"));
-        }
-
-        public static TextNode ColorModifier(this TextNode node, Color color)
-        {
-            return node.AddModifier(new RichModifier("color", $"#{color.ToHexString().ToLower()}"));
-        }
-
-        public static TextNode ColorModifier(this TextNode node, string color)
-        {
-            return node.AddModifier(new RichModifier("color", color));
-        }
-
-        public static TextNode SizeModifier(this TextNode node, string size)
-        {
-            return node.AddModifier(new RichModifier("size", size));
-        }
-
-        public static TextNode StyleModifier(this TextNode node, string style)
-        {
-            return node.AddModifier(new RichModifier("style", style));
-        }
-
-
-
-        public static TextNode BoldModifier(this string node)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("b"));
-        }
-
-        public static TextNode ItalicModifier(this string node)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("i"));
-        }
-
-        public static TextNode ColorModifier(this string node, Color color)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("color", $"#{color.ToHexString().ToLower()}"));
-        }
-
-        public static TextNode ColorModifier(this string node, string color)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("color", color));
-        }
-
-        public static TextNode SizeModifier(this string node, string size)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("size", size));
-        }
-
-        public static TextNode StyleModifier(this string node, string style)
-        {
-            return new TextNode(node).AddModifier(new RichModifier("style", style));
-        }
     }
 }

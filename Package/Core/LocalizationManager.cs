@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
@@ -249,6 +250,7 @@ namespace PicoShot.Localization
             {
                 LoadLanguageData(targetLanguage);
                 _currentLanguageCode = targetLanguage;
+
                 _arrayCache.Clear();
                 OnLanguageChanged?.Invoke();
             }
@@ -370,6 +372,7 @@ namespace PicoShot.Localization
         /// Strings are treated as literals, Key structs are resolved as localization keys,
         /// other types are converted via ToString().
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string GetText(string key, params object[] args)
         {
             if (string.IsNullOrEmpty(key))
@@ -449,13 +452,31 @@ namespace PicoShot.Localization
             return text;
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static string GetRawText(string key)
         {
+            int foundIndex = -1;
+            if (key.EndsWith("]"))
+            {
+                int start = key.LastIndexOf("[");
+
+                if (start > -1)
+                {
+                    string idText = key.Substring(start + 1, key.Length - (start + 2));
+
+                    if (int.TryParse(idText, out int idx))
+                    {
+                        key = key.Substring(0, start);
+                        foundIndex = idx;
+                    }
+                }
+            }
+
             if (_currentLanguageData != null && _currentLanguageData.TryGetValue(key, out var value))
             {
                 return value switch
                 {
-                    List<string> list => list.Count > 0 ? list[0] : key,
+                    List<string> list => list.Count > 0 ? list[foundIndex > -1 && foundIndex < list.Count ? foundIndex : 0] : key,
                     _ => value?.ToString() ?? key
                 };
             }
@@ -465,7 +486,7 @@ namespace PicoShot.Localization
                 OnMissingTranslation?.Invoke($"Using fallback for key '{key}' in '{_currentLanguageCode}'");
                 return fallbackValue switch
                 {
-                    List<string> list => list.Count > 0 ? list[0] : key,
+                    List<string> list => list.Count > 0 ? list[foundIndex > -1 && foundIndex < list.Count ? foundIndex : 0] : key,
                     _ => fallbackValue?.ToString() ?? key
                 };
             }
