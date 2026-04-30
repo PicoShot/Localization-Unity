@@ -1,6 +1,6 @@
 {
   "name": "com.picoshot.localization",
-  "version": "1.5.4",
+  "version": "1.5.5",
   "displayName": "PicoShot Localization",
   "description": "A lightweight zero-dependencies, high-performance localization system for Unity with support for multiple languages, RTL text, binary format (BLOC), and DeepL translation integration.",
   "unity": "2022.3",
