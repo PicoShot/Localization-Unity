@@ -45,6 +45,8 @@ namespace PicoShot.Localization
         public TextNode[] Nodes;
         public RichModifier[] RichModifiers;
 
+        public bool IsEmpty => string.IsNullOrWhiteSpace(Value);
+
         private string applyModifiers(in string text)
         {
             if (RichModifiers == null || RichModifiers.Length == 0)
@@ -89,6 +91,7 @@ namespace PicoShot.Localization
             });
         }
 
+        public static TextNode Empty => Text(string.Empty);
         public static TextNode Text(string text)
         {
             return new TextNode()
