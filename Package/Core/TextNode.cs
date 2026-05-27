@@ -99,7 +99,7 @@ namespace PicoShot.Localization
                 Value = text,
                 Type = NodeType.PlainText,
                 Nodes = Array.Empty<TextNode>(),
-                RichModifiers = Array.Empty<TextNode>()
+                RichModifiers = Array.Empty<RichModifier>()
             };
         }
         public static TextNode Localized(string translationKeyName, params TextNode[] arguments)
