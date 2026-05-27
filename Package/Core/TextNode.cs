@@ -98,7 +98,8 @@ namespace PicoShot.Localization
             {
                 Value = text,
                 Type = NodeType.PlainText,
-                Nodes = Array.Empty<TextNode>()
+                Nodes = Array.Empty<TextNode>(),
+                RichModifiers = Array.Empty<TextNode>()
             };
         }
         public static TextNode Localized(string translationKeyName, params TextNode[] arguments)
@@ -249,50 +250,50 @@ namespace PicoShot.Localization
     {
         public static void WriteRichModifier(this NetworkWriter writer, RichModifier value)
         {
-            writer.WriteString(value.Tag);
-            writer.WriteString(value.Argument);
+            writer.WriteString(value.Tag ?? string.Empty);
+            writer.WriteString(value.Argument ?? string.Empty);
         }
 
         public static RichModifier ReadRichModifier(this NetworkReader reader)
         {
             return new RichModifier()
             {
-                Tag = reader.ReadString(),
-                Argument = reader.ReadString()
+                Tag = reader.ReadString() ?? string.Empty,
+                Argument = reader.ReadString() ?? string.Empty
             };
         }
 
         public static void WriteTextNode(this NetworkWriter writer, TextNode value)
         {
-            writer.WriteString(value.Value);
+            writer.WriteString(value.Value ?? string.Empty);
             writer.WriteByte((byte)value.Type);
 
-            writer.WriteInt(value.Nodes?.Length ?? 0);
-            if (value.Nodes != null)
-                for (int i = 0; i < value.Nodes.Length; i++)
-                    writer.WriteTextNode(value.Nodes[i]);
+            var nodes = value.Nodes ?? Array.Empty<TextNode>();
+            writer.WriteInt(nodes.Length);
+            for (int i = 0; i < nodes.Length; i++)
+                writer.WriteTextNode(nodes[i]);
 
-            writer.WriteInt(value.RichModifiers?.Length ?? 0);
-            if (value.RichModifiers != null)
-                for (int i = 0; i < value.RichModifiers.Length; i++)
-                    writer.WriteRichModifier(value.RichModifiers[i]);
+            var modifiers = value.RichModifiers ?? Array.Empty<RichModifier>();
+            writer.WriteInt(modifiers.Length);
+            for (int i = 0; i < modifiers.Length; i++)
+                writer.WriteRichModifier(modifiers[i]);
         }
 
         public static TextNode ReadTextNode(this NetworkReader reader)
         {
             var node = new TextNode()
             {
-                Value = reader.ReadString(),
+                Value = reader.ReadString() ?? string.Empty,
                 Type = (TextNode.NodeType)reader.ReadByte()
             };
 
             int nodeCount = reader.ReadInt();
-            node.Nodes = new TextNode[nodeCount];
+            node.Nodes = nodeCount > 0 ? new TextNode[nodeCount] : Array.Empty<TextNode>();
             for (int i = 0; i < nodeCount; i++)
                 node.Nodes[i] = reader.ReadTextNode();
 
             int modifierCount = reader.ReadInt();
-            node.RichModifiers = new RichModifier[modifierCount];
+            node.RichModifiers = modifierCount > 0 ? new RichModifier[modifierCount] : Array.Empty<RichModifier>();
             for (int i = 0; i < modifierCount; i++)
                 node.RichModifiers[i] = reader.ReadRichModifier();
 
