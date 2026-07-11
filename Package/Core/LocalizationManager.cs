@@ -30,6 +30,7 @@ namespace PicoShot.Localization
         #region Events
 
         public static event Action OnLanguageChanged;
+        public static event Action<TMP_FontAsset, Font> OnFontChanged;
         public static event Action<string> OnLanguageLoadError;
         public static event Action<string> OnMissingTranslation;
 
@@ -387,6 +388,7 @@ namespace PicoShot.Localization
 
                 _arrayCache.Clear();
                 OnLanguageChanged?.Invoke();
+                TriggerFontChanged();
             }
             catch (Exception ex)
             {
@@ -408,6 +410,27 @@ namespace PicoShot.Localization
             }
 
             return DefaultLanguage;
+        }
+
+        private static void TriggerFontChanged()
+        {
+            var config = LocalizationConfigProvider.Config;
+            if (config == null || !config.IsFontSystemEnabled) return;
+
+            TMP_FontAsset tmpFont = config.DefaultTMPFont;
+            Font legacyFont = config.DefaultLegacyFont;
+
+            foreach (var mapping in config.FontMappings)
+            {
+                if (mapping.languageCode == _currentLanguageCode)
+                {
+                    if (mapping.tmpFont != null) tmpFont = mapping.tmpFont;
+                    if (mapping.legacyFont != null) legacyFont = mapping.legacyFont;
+                    break;
+                }
+            }
+
+            OnFontChanged?.Invoke(tmpFont, legacyFont);
         }
 
         private static void LoadLanguageData(string languageCode)

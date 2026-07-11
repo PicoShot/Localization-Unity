@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using TMPro;
 
 namespace PicoShot.Localization.Config
 {
@@ -76,6 +77,23 @@ namespace PicoShot.Localization.Config
         [SerializeField]
         private List<HashEntry> _fileHashes = new();
 
+        [Header("Font System")]
+        [Tooltip("Enable language-specific fonts system")]
+        [SerializeField]
+        private bool _isFontSystemEnabled = false;
+
+        [Tooltip("Default TextMeshPro font asset")]
+        [SerializeField]
+        private TMP_FontAsset _defaultTMPFont;
+
+        [Tooltip("Default Legacy Text font")]
+        [SerializeField]
+        private Font _defaultLegacyFont;
+
+        [Tooltip("Font overrides per language")]
+        [SerializeField]
+        private List<LanguageFontMapping> _fontMappings = new();
+
         /// <summary>
         /// Default language code.
         /// </summary>
@@ -105,6 +123,26 @@ namespace PicoShot.Localization.Config
         /// Languages allowed to load when protection is enabled.
         /// </summary>
         public IReadOnlyList<string> SelectedLanguages => _selectedLanguages;
+
+        /// <summary>
+        /// Whether the font system is enabled.
+        /// </summary>
+        public bool IsFontSystemEnabled => _isFontSystemEnabled;
+
+        /// <summary>
+        /// Gets the default TMP Font.
+        /// </summary>
+        public TMP_FontAsset DefaultTMPFont => _defaultTMPFont;
+
+        /// <summary>
+        /// Gets the default Legacy Font.
+        /// </summary>
+        public Font DefaultLegacyFont => _defaultLegacyFont;
+
+        /// <summary>
+        /// Gets font mappings per language.
+        /// </summary>
+        public IReadOnlyList<LanguageFontMapping> FontMappings => _fontMappings;
 
         /// <summary>
         /// Gets the stored hash for a file.
@@ -218,6 +256,46 @@ namespace PicoShot.Localization.Config
             return _fileHashes;
         }
 
+        public void SetFontSystemEnabled(bool enabled)
+        {
+            _isFontSystemEnabled = enabled;
+        }
+
+        public void SetDefaultFonts(TMP_FontAsset tmpFont, Font legacyFont)
+        {
+            _defaultTMPFont = tmpFont;
+            _defaultLegacyFont = legacyFont;
+        }
+
+        public void SetFontMapping(string languageCode, TMP_FontAsset tmpFont, Font legacyFont)
+        {
+            for (int i = 0; i < _fontMappings.Count; i++)
+            {
+                if (_fontMappings[i].languageCode == languageCode)
+                {
+                    _fontMappings[i] = new LanguageFontMapping
+                    {
+                        languageCode = languageCode,
+                        tmpFont = tmpFont,
+                        legacyFont = legacyFont
+                    };
+                    return;
+                }
+            }
+            
+            _fontMappings.Add(new LanguageFontMapping
+            {
+                languageCode = languageCode,
+                tmpFont = tmpFont,
+                legacyFont = legacyFont
+            });
+        }
+
+        public void RemoveFontMapping(string languageCode)
+        {
+            _fontMappings.RemoveAll(m => m.languageCode == languageCode);
+        }
+
 #endif
 
         #endregion
@@ -231,5 +309,16 @@ namespace PicoShot.Localization.Config
     {
         public string fileName;
         public string hash;
+    }
+
+    /// <summary>
+    /// Serializable mapping of language to specific fonts.
+    /// </summary>
+    [Serializable]
+    public struct LanguageFontMapping
+    {
+        public string languageCode;
+        public TMP_FontAsset tmpFont;
+        public Font legacyFont;
     }
 }

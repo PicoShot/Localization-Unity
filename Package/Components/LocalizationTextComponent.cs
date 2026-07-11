@@ -151,6 +151,7 @@ namespace PicoShot.Localization
         private void OnEnable()
         {
             LocalizationManager.OnLanguageChanged += UpdateText;
+            LocalizationManager.OnFontChanged += UpdateFont;
             if (_isInitialized && Application.isPlaying)
             {
                 UpdateText();
@@ -160,11 +161,13 @@ namespace PicoShot.Localization
         private void OnDisable()
         {
             LocalizationManager.OnLanguageChanged -= UpdateText;
+            LocalizationManager.OnFontChanged -= UpdateFont;
         }
 
         private void OnDestroy()
         {
             LocalizationManager.OnLanguageChanged -= UpdateText;
+            LocalizationManager.OnFontChanged -= UpdateFont;
             _textProcessors.Clear();
         }
 
@@ -237,6 +240,31 @@ namespace PicoShot.Localization
             catch (Exception ex)
             {
                 Debug.LogError($"[LocalizationTextComponent] Error updating text on {gameObject.name}: {ex.Message}", this);
+            }
+        }
+
+        /// <summary>
+        /// Updates the font based on the language configuration.
+        /// </summary>
+        private void UpdateFont(TMP_FontAsset tmpFont, Font legacyFont)
+        {
+            if (!isActiveAndEnabled) return;
+            if (!_isInitialized)
+            {
+                Initialize();
+            }
+
+            if (tmpFont != null)
+            {
+                if (_tmpText != null) _tmpText.font = tmpFont;
+                // TMP_Dropdown caption and item fonts are usually driven by their internal TMP_Text components
+                // If needed, they could be updated here, but usually, updating the child TMP_Text is sufficient.
+            }
+
+            if (legacyFont != null)
+            {
+                if (_legacyText != null) _legacyText.font = legacyFont;
+                if (_textMesh != null) _textMesh.font = legacyFont;
             }
         }
 
@@ -440,6 +468,24 @@ namespace PicoShot.Localization
         }
 
         #endregion
+
+        [ContextMenu("Switch language")]
+        private void ChangeLanguage()
+        {
+            var languages = System.Linq.Enumerable.ToList(System.Linq.Enumerable.OrderBy(LocalizationManager.GetAvailableLanguageCodes(), l => l));
+            if (languages.Count == 0) return;
+
+            string current = LocalizationManager.CurrentLanguage;
+            int currentIndex = languages.FindIndex(l => string.Equals(l, current, System.StringComparison.OrdinalIgnoreCase));
+            
+            int nextIndex = (currentIndex + 1) % languages.Count;
+            LocalizationManager.SetLanguage(languages[nextIndex]);
+            
+            if (!Application.isPlaying)
+            {
+                UpdateText();
+            }
+        }
     }
 
     /// <summary>
