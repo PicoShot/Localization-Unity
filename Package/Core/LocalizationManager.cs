@@ -143,6 +143,17 @@ namespace PicoShot.Localization
         public static bool IsInitialized => _isInitialized;
         public static bool IsRightToLeft => LanguageDefinitions.IsRightToLeft(_currentLanguageCode);
 
+#if UNITY_EDITOR
+        public static IEnumerable<string> AllTranslationKeys
+        {
+            get
+            {
+                if (!_isInitialized) Initialize();
+                return _allTranslationKeys ?? Enumerable.Empty<string>();
+            }
+        }
+#endif
+
         #endregion
 
         #region Initialization

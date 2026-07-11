@@ -23,6 +23,7 @@ namespace PicoShot.Localization.Editor.Data
         public bool HasUnsavedChanges { get; set; }
         public string SelectedKey { get; set; }
         public string LastSelectedKey { get; set; }
+        public string SelectedTable { get; set; } = "";
 
         // Search & Filters
         public string KeySearchFilter { get; set; } = "";
@@ -154,6 +155,13 @@ namespace PicoShot.Localization.Editor.Data
 
             var query = Keys.AsEnumerable();
 
+            // Filter by table first
+            if (!string.IsNullOrEmpty(SelectedTable))
+            {
+                string tablePrefix = SelectedTable + ".";
+                query = query.Where(key => key.StartsWith(tablePrefix));
+            }
+
             if (hasFilter)
                 query = query.Where(key => key.ToLower().Contains(lowercaseFilter));
 
@@ -166,6 +174,24 @@ namespace PicoShot.Localization.Editor.Data
                 query = query.OrderBy(key => key);
 
             return query;
+        }
+
+        /// <summary>
+        /// Gets all unique tables from existing keys.
+        /// </summary>
+        public IEnumerable<string> GetTables()
+        {
+            return Keys.Where(k => k.Contains('.')).Select(k => k.Substring(0, k.IndexOf('.'))).Distinct().OrderBy(t => t);
+        }
+
+        /// <summary>
+        /// Helper to extract the local name of a key by stripping its table prefix if present.
+        /// </summary>
+        public string GetLocalKeyName(string fullKey)
+        {
+            if (string.IsNullOrEmpty(fullKey)) return fullKey;
+            int dotIndex = fullKey.IndexOf('.');
+            return dotIndex >= 0 ? fullKey.Substring(dotIndex + 1) : fullKey;
         }
 
         /// <summary>
@@ -338,6 +364,28 @@ namespace PicoShot.Localization.Editor.Data
             KeyFoldouts.Remove(key);
             HasUnsavedChanges = true;
             return true;
+        }
+
+        /// <summary>
+        /// Removes a table and all its keys.
+        /// </summary>
+        public void RemoveTable(string table)
+        {
+            if (string.IsNullOrEmpty(table)) return;
+            
+            string prefix = table + ".";
+            var keysToRemove = Keys.Where(k => k.StartsWith(prefix)).ToList();
+            
+            foreach (var k in keysToRemove)
+            {
+                RemoveKey(k);
+            }
+            
+            if (SelectedTable == table)
+            {
+                SelectedTable = "";
+                SelectedKey = null;
+            }
         }
 
         /// <summary>

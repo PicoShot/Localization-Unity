@@ -221,6 +221,84 @@ namespace PicoShot.Localization.Editor.Services
         }
 
         /// <summary>
+        /// Exports a specific table to a JSON file.
+        /// </summary>
+        public void ExportTableToJson(string table)
+        {
+            if (string.IsNullOrEmpty(table)) return;
+            string prefix = table + ".";
+            
+            string path = EditorUtility.SaveFilePanel(
+                $"Export Table '{table}' to JSON",
+                "",
+                $"Table_{table}_{DateTime.Now:yyyyMMdd_HHmmss}.json",
+                "json");
+
+            if (string.IsNullOrEmpty(path)) return;
+            
+            var tableKeys = _data.Keys.Where(k => k.StartsWith(prefix)).ToList();
+            
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("{");
+
+                for (int i = 0; i < tableKeys.Count; i++)
+                {
+                    string fullKey = tableKeys[i];
+                    string localKey = _data.GetLocalKeyName(fullKey);
+                    sb.Append($"  \"{EscapeJsonString(localKey)}\": {{\n");
+
+                    if (_data.LanguageData.TryGetValue(fullKey, out var keyData))
+                    {
+                        var langs = keyData.Keys.ToList();
+                        for (int j = 0; j < langs.Count; j++)
+                        {
+                            string lang = langs[j];
+                            var value = keyData[lang];
+
+                            sb.Append($"    \"{lang}\": ");
+
+                            if (value is List<string> arr)
+                            {
+                                sb.Append("[");
+                                for (int k = 0; k < arr.Count; k++)
+                                {
+                                    sb.Append($"\"{EscapeJsonString(arr[k])}\"");
+                                    if (k < arr.Count - 1) sb.Append(", ");
+                                }
+                                sb.Append("]");
+                            }
+                            else
+                            {
+                                sb.Append($"\"{EscapeJsonString(value?.ToString() ?? "")}\"");
+                            }
+
+                            if (j < langs.Count - 1) sb.Append(",");
+                            sb.Append("\n");
+                        }
+                    }
+
+                    sb.Append("  }");
+                    if (i < tableKeys.Count - 1) sb.Append(",");
+                    sb.Append("\n");
+                }
+
+                sb.AppendLine("}");
+                File.WriteAllText(path, sb.ToString());
+
+                EditorUtility.DisplayDialog("Export Successful",
+                    $"Exported {tableKeys.Count} keys from table '{table}' to:\n{path}", "OK");
+                Debug.Log($"[LocalizationEditor] Exported table to JSON: {path}");
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.DisplayDialog("Export Failed", $"Failed to export table: {ex.Message}", "OK");
+                Debug.LogError($"[LocalizationEditor] JSON table export failed: {ex}");
+            }
+        }
+
+        /// <summary>
         /// Imports localization data from a JSON file.
         /// </summary>
         public void ImportFromJson()
@@ -329,6 +407,89 @@ namespace PicoShot.Localization.Editor.Services
             {
                 EditorUtility.DisplayDialog("Import Failed", $"Failed to import data: {ex.Message}", "OK");
                 Debug.LogError($"[LocalizationEditor] JSON import failed: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Imports localization data into a specific table from a JSON file.
+        /// </summary>
+        public void ImportTableFromJson(string table)
+        {
+            if (string.IsNullOrEmpty(table)) return;
+            string prefix = table + ".";
+
+            string path = EditorUtility.OpenFilePanel(
+                $"Import JSON into Table '{table}'",
+                "",
+                "json");
+
+            if (string.IsNullOrEmpty(path)) return;
+
+            try
+            {
+                string json = File.ReadAllText(path);
+                var importData = ParseLocalizationJson(json);
+
+                if (importData.Count == 0)
+                {
+                    EditorUtility.DisplayDialog("Import Failed", "Invalid or empty JSON file.", "OK");
+                    return;
+                }
+
+                int importedKeys = 0;
+                int importedLangs = 0;
+
+                foreach (var kvp in importData)
+                {
+                    string key = prefix + kvp.Key.Trim();
+                    var langData = kvp.Value;
+
+                    if (!_data.LanguageData.TryGetValue(key, out var keyData))
+                    {
+                        keyData = new Dictionary<string, object>();
+                        _data.LanguageData[key] = keyData;
+                        _data.Keys.Add(key);
+                        importedKeys++;
+                    }
+
+                    foreach (var langKvp in langData)
+                    {
+                        string lang = langKvp.Key;
+                        object value = langKvp.Value;
+
+                        if (!LanguageDefinitions.IsValidLanguage(lang))
+                            continue;
+
+                        if (!_data.LanguageCodes.Contains(lang))
+                        {
+                            _data.LanguageCodes.Add(lang);
+                            importedLangs++;
+                        }
+
+                        if (value is List<string> list)
+                        {
+                            keyData[lang] = new List<string>(list);
+                        }
+                        else
+                        {
+                            keyData[lang] = value?.ToString() ?? "";
+                        }
+                    }
+                }
+
+                _data.Keys = _data.Keys.Distinct().ToList();
+                _data.Keys.Sort();
+                _data.LanguageCodes.Sort();
+                _data.HasUnsavedChanges = true;
+
+                EditorUtility.DisplayDialog("Import Successful", 
+                    $"Imported {importData.Count} keys into table '{table}'.", "OK");
+                Debug.Log($"[LocalizationEditor] Imported JSON into table '{table}': {path}");
+            }
+            catch (Exception ex)
+            {
+                EditorUtility.DisplayDialog("Import Failed", $"Failed to import table data: {ex.Message}", "OK");
+                Debug.LogError($"[LocalizationEditor] JSON table import failed: {ex}");
             }
         }
 

@@ -17,6 +17,8 @@ namespace PicoShot.Localization.Editor.Tabs
         private readonly JsonService _jsonService;
         private bool _isResizingKeysList;
         private string _newKey = "";
+        private string _newTable = "";
+        private bool _isCreatingTable = false;
         private bool _pendingDelete;
 
         private static Texture2D _transparentTexture;
@@ -36,6 +38,7 @@ namespace PicoShot.Localization.Editor.Tabs
             // Add key and filter section
             using (BeginBox())
             {
+                DrawTableSelectionSection();
                 DrawAddKeySection();
                 DrawSearchAndFilterSection();
             }
@@ -50,10 +53,87 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.EndHorizontal();
         }
 
+        private void DrawTableSelectionSection()
+        {
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField("Tables", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            var tables = new List<string> { "All Keys" };
+            tables.AddRange(Data.GetTables());
+            
+            if (!string.IsNullOrEmpty(Data.SelectedTable) && !tables.Contains(Data.SelectedTable))
+            {
+                tables.Add(Data.SelectedTable);
+            }
+            
+            int currentIndex = string.IsNullOrEmpty(Data.SelectedTable) ? 0 : tables.IndexOf(Data.SelectedTable);
+            if (currentIndex < 0) currentIndex = 0;
+
+            int newIndex = EditorGUILayout.Popup(currentIndex, tables.ToArray());
+            if (newIndex != currentIndex)
+            {
+                Data.SelectedTable = newIndex == 0 ? "" : tables[newIndex];
+                Data.SelectedKey = null;
+                GUI.FocusControl(null);
+            }
+
+            if (!string.IsNullOrEmpty(Data.SelectedTable))
+            {
+                GUI.backgroundColor = Color.red;
+                if (GUILayout.Button("Delete Table", GUILayout.Width(90)))
+                {
+                    ConfirmDeleteTable(Data.SelectedTable);
+                }
+                GUI.backgroundColor = Color.white;
+                
+                if (GUILayout.Button("Export JSON", GUILayout.Width(85)))
+                {
+                    _jsonService.ExportTableToJson(Data.SelectedTable);
+                    GUIUtility.ExitGUI();
+                }
+                
+                if (GUILayout.Button("Import JSON", GUILayout.Width(85)))
+                {
+                    _jsonService.ImportTableFromJson(Data.SelectedTable);
+                    GUIUtility.ExitGUI();
+                }
+            }
+
+            if (GUILayout.Button(_isCreatingTable ? "Cancel" : "New Table...", GUILayout.Width(100)))
+            {
+                _isCreatingTable = !_isCreatingTable;
+                _newTable = "";
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (_isCreatingTable)
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField("Table Name:", GUILayout.Width(80));
+                _newTable = EditorGUILayout.TextField(_newTable);
+                if (GUILayout.Button("Create", GUILayout.Width(60)))
+                {
+                    if (!string.IsNullOrWhiteSpace(_newTable) && !_newTable.Contains("."))
+                    {
+                        Data.SelectedTable = _newTable.Trim();
+                        _isCreatingTable = false;
+                        GUI.FocusControl(null);
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+            }
+
+            EditorGUILayout.EndVertical();
+        }
+
         private void DrawAddKeySection()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Add New Key", EditorStyles.boldLabel);
+            string title = string.IsNullOrEmpty(Data.SelectedTable) 
+                ? "Add New Key" 
+                : $"Add New Key to '{Data.SelectedTable}'";
+            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Key Name:", GUILayout.Width(70));
@@ -174,7 +254,8 @@ namespace PicoShot.Localization.Editor.Tabs
                     typeIndicator = "[ ]";
             }
 
-            string buttonLabel = $"<color=#888888>{typeIndicator}</color> {key}";
+            string displayKeyName = string.IsNullOrEmpty(Data.SelectedTable) ? key : Data.GetLocalKeyName(key);
+            string buttonLabel = $"<color=#888888>{typeIndicator}</color> {displayKeyName}";
 
             if (GUI.Button(keyRect, buttonLabel, keyStyle))
             {
@@ -488,35 +569,44 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private void AddKey(bool isArray)
         {
-            if (Data.AddKey(_newKey, isArray))
+            string cleanKey = _newKey?.Trim();
+            if (string.IsNullOrEmpty(cleanKey)) return;
+
+            string fullKey = string.IsNullOrEmpty(Data.SelectedTable) ? cleanKey : $"{Data.SelectedTable}.{cleanKey}";
+            if (Data.AddKey(fullKey, isArray))
             {
                 _newKey = "";
                 Editor.Repaint();
             }
             else
             {
-                Debug.LogWarning($"Key '{_newKey}' already exists or is empty.");
+                Debug.LogWarning($"Key '{fullKey}' already exists or is empty.");
             }
         }
 
         private void RenameKey()
         {
             var key = Data.SelectedKey;
-            OpenTextEditor(key, (newKey) =>
+            string localName = Data.GetLocalKeyName(key);
+            string prefix = string.IsNullOrEmpty(Data.SelectedTable) ? "" : $"{Data.SelectedTable}.";
+
+            OpenTextEditor(localName, (newLocalKey) =>
             {
-                if (string.IsNullOrEmpty(newKey))
+                if (string.IsNullOrEmpty(newLocalKey))
                 {
                     EditorUtility.DisplayDialog("Error", "Key name cannot be empty.", "OK");
                     return;
                 }
 
-                if (Data.Keys.Contains(newKey))
+                string newFullKey = prefix + newLocalKey;
+
+                if (Data.Keys.Contains(newFullKey))
                 {
-                    EditorUtility.DisplayDialog("Error", $"Key '{newKey}' already exists.", "OK");
+                    EditorUtility.DisplayDialog("Error", $"Key '{newFullKey}' already exists.", "OK");
                     return;
                 }
 
-                Data.RenameKey(key, newKey);
+                Data.RenameKey(key, newFullKey);
                 Editor.Repaint();
             });
         }
@@ -540,6 +630,16 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 Data.RemoveKey(Data.SelectedKey);
                 Data.SelectedKey = "";
+                Editor.Repaint();
+            }
+        }
+
+        private void ConfirmDeleteTable(string table)
+        {
+            if (EditorUtility.DisplayDialog("Delete Table",
+                    $"Are you sure you want to delete the table '{table}' and ALL its keys?\nThis cannot be undone!", "Yes, Delete All", "Cancel"))
+            {
+                Data.RemoveTable(table);
                 Editor.Repaint();
             }
         }
