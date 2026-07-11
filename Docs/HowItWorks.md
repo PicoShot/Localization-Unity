@@ -321,23 +321,28 @@ Called automatically on `Application.quitting`.
 
 ### Language Editor Window
 
-```
+```text
 ┌─────────────────────────────────────────┐
 │ Language Editor                         │
 ├─────────────────────────────────────────┤
-│ [Languages] [Keys] [Components] [...]  │ ← Tab Navigation
+│ [Languages] [Keys] [Fonts] [Settings]   │ ← Tab Navigation
 ├─────────────────────────────────────────┤
 │                                         │
 │  Left Panel        │  Right Panel       │
-│  ┌──────────────┐  │  ┌──────────────┐ │
-│  │ Keys List    │  │  │ Key Details  │ │
-│  │ (resizable)  │  │  │ - Translation│ │
-│  │              │  │  │ - Hint       │ │
-│  │              │  │  │ - Actions    │ │
-│  └──────────────┘  │  └──────────────┘ │
+│  ┌──────────────┐  │  ┌──────────────┐  │
+│  │ Table Select │  │  │ Key Details  │  │
+│  │ Add Key/Value│  │  │ - Translation│  │
+│  │ Keys List    │  │  │ - Actions    │  │
+│  └──────────────┘  │  └──────────────┘  │
 │                                         │
 └─────────────────────────────────────────┘
 ```
+
+#### Smart Workflows
+
+- **Virtual Tables:** Keys can be organized into tables using dot notation (e.g. `UI.MainMenu.Start`). The editor allows filtering, editing, and exporting/importing specific tables in JSON format seamlessly.
+- **Inline Initialization:** Creating a new key allows for immediate assignment of the default language value, streamlining the data entry process for both string and array keys.
+- **Font System:** The Fonts tab allows assignment of primary and language-specific fallback fonts (supporting both TextMeshPro and Legacy fonts). The `LocalizationManager` automatically handles switching fonts on all components via the `OnFontChanged` event when the language changes.
 
 ### Build Processor
 

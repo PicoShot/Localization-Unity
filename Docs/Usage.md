@@ -354,7 +354,12 @@ LocalizationManager.BindText(textMesh, "title", arrayIndex: 0);
 
 ### Manual Component Usage
 
-For more control, you can work with `LocalizationTextComponent` directly:
+For more control, you can work with `LocalizationTextComponent` directly.
+
+#### Inspector Integration
+The Unity Inspector for `LocalizationTextComponent` provides a smart interface:
+- **Table & Key Dropdowns:** Instead of manually typing keys, you can select the target table and key from searchable dropdown menus to prevent typos.
+- **Context Menu:** Right-click the component and select `Switch language` to dynamically cycle through available languages and instantly preview the text directly in Edit Mode.
 
 ### Properties
 
