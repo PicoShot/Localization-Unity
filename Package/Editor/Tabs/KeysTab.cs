@@ -17,6 +17,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private readonly JsonService _jsonService;
         private bool _isResizingKeysList;
         private string _newKey = "";
+        private string _newValue = "";
         private string _newTable = "";
         private bool _isCreatingTable = false;
         private bool _pendingDelete;
@@ -136,8 +137,14 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Key Name:", GUILayout.Width(70));
+            EditorGUILayout.LabelField("Key Name:", GUILayout.Width(130));
             _newKey = EditorGUILayout.TextField(_newKey);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            string defaultLang = PicoShot.Localization.Config.LocalizationConfigProvider.Config.DefaultLanguage;
+            EditorGUILayout.LabelField($"Default Value ({defaultLang}):", GUILayout.Width(130));
+            _newValue = EditorGUILayout.TextField(_newValue);
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -575,7 +582,25 @@ namespace PicoShot.Localization.Editor.Tabs
             string fullKey = string.IsNullOrEmpty(Data.SelectedTable) ? cleanKey : $"{Data.SelectedTable}.{cleanKey}";
             if (Data.AddKey(fullKey, isArray))
             {
+                if (!string.IsNullOrEmpty(_newValue))
+                {
+                    string defaultLang = PicoShot.Localization.Config.LocalizationConfigProvider.Config.DefaultLanguage;
+                    if (isArray)
+                    {
+                        foreach (var lang in Data.LanguageCodes)
+                        {
+                            var list = (List<string>)Data.LanguageData[fullKey][lang];
+                            list.Add(lang == defaultLang ? _newValue : "");
+                        }
+                    }
+                    else
+                    {
+                        Data.LanguageData[fullKey][defaultLang] = _newValue;
+                    }
+                }
+
                 _newKey = "";
+                _newValue = "";
                 Editor.Repaint();
             }
             else
