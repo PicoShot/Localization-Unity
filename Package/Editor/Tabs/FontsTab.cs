@@ -1,3 +1,4 @@
+using System;
 using UnityEditor;
 using UnityEngine;
 using TMPro;
@@ -117,7 +118,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField($"Language: {langCode}", EditorStyles.boldLabel);
                 
-                var mapping = mappings.FirstOrDefault(m => m.languageCode == langCode);
+                var mapping = mappings.FirstOrDefault(m => m.languageCode.Equals(langCode, StringComparison.OrdinalIgnoreCase));
                 
                 EditorGUI.BeginChangeCheck();
                 

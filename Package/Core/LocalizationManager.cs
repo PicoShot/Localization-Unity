@@ -422,7 +422,7 @@ namespace PicoShot.Localization
 
             foreach (var mapping in config.FontMappings)
             {
-                if (mapping.languageCode == _currentLanguageCode)
+                if (mapping.languageCode.Equals(_currentLanguageCode, StringComparison.OrdinalIgnoreCase))
                 {
                     if (mapping.tmpFont != null) tmpFont = mapping.tmpFont;
                     if (mapping.legacyFont != null) legacyFont = mapping.legacyFont;

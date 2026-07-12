@@ -271,7 +271,7 @@ namespace PicoShot.Localization.Config
         {
             for (int i = 0; i < _fontMappings.Count; i++)
             {
-                if (_fontMappings[i].languageCode == languageCode)
+                if (_fontMappings[i].languageCode.Equals(languageCode, StringComparison.OrdinalIgnoreCase))
                 {
                     _fontMappings[i] = new LanguageFontMapping
                     {
@@ -293,7 +293,7 @@ namespace PicoShot.Localization.Config
 
         public void RemoveFontMapping(string languageCode)
         {
-            _fontMappings.RemoveAll(m => m.languageCode == languageCode);
+            _fontMappings.RemoveAll(m => m.languageCode.Equals(languageCode, StringComparison.OrdinalIgnoreCase));
         }
 
 #endif
