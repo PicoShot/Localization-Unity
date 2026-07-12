@@ -261,13 +261,21 @@ namespace PicoShot.Localization
             if (tmpFont != null)
             {
                 if (_tmpText != null) _tmpText.font = tmpFont;
-                // TMP_Dropdown caption and item fonts are usually driven by their internal TMP_Text components
-                // If needed, they could be updated here, but usually, updating the child TMP_Text is sufficient.
+                if (_tmpDropdown != null)
+                {
+                    if (_tmpDropdown.captionText != null) _tmpDropdown.captionText.font = tmpFont;
+                    if (_tmpDropdown.itemText != null) _tmpDropdown.itemText.font = tmpFont;
+                }
             }
 
             if (legacyFont != null)
             {
                 if (_legacyText != null) _legacyText.font = legacyFont;
+                if (_legacyDropdown != null)
+                {
+                    if (_legacyDropdown.captionText != null) _legacyDropdown.captionText.font = legacyFont;
+                    if (_legacyDropdown.itemText != null) _legacyDropdown.itemText.font = legacyFont;
+                }
                 if (_textMesh != null) _textMesh.font = legacyFont;
             }
         }
