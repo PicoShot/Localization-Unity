@@ -487,6 +487,8 @@ namespace PicoShot.Localization
             var languages = LocalizationManager.GetAvailableLanguageCodes().OrderBy(l => l).ToList();
             if (languages.Count == 0) return;
 
+            LocalizationManager.Initialize();
+
             string current = LocalizationManager.CurrentLanguage;
             int currentIndex = languages.FindIndex(l => string.Equals(l, current, System.StringComparison.OrdinalIgnoreCase));
             
