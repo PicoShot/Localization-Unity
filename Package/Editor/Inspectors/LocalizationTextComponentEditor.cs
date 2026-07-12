@@ -7,7 +7,6 @@ using UnityEngine;
 namespace PicoShot.Localization.Editor.Inspectors
 {
     [CustomEditor(typeof(LocalizationTextComponent))]
-    [CanEditMultipleObjects]
     public class LocalizationTextComponentEditor : UnityEditor.Editor
     {
         private SerializedProperty _translationKeyProp;
