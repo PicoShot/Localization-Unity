@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
@@ -114,7 +115,7 @@ namespace PicoShot.Localization.Editor.Tabs
 
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Key Name:", GUILayout.Width(130));
-            _newKey = EditorGUILayout.TextField(_newKey);
+            _newKey = LocalizationTextEditorPopup.FilterKeyName(EditorGUILayout.TextField(_newKey));
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.BeginHorizontal();
@@ -572,7 +573,7 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 if (!string.IsNullOrEmpty(_newValue))
                 {
-                    string defaultLang = PicoShot.Localization.Config.LocalizationConfigProvider.Config.DefaultLanguage;
+                    string defaultLang = Config.LocalizationConfigProvider.Config.DefaultLanguage;
                     if (isArray)
                     {
                         foreach (var lang in Data.LanguageCodes)
@@ -593,7 +594,7 @@ namespace PicoShot.Localization.Editor.Tabs
             }
             else
             {
-                Debug.LogWarning($"Key '{fullKey}' already exists or is empty.");
+                Debug.LogWarning($"Key '{fullKey}' already exists.");
             }
         }
 
@@ -611,17 +612,25 @@ namespace PicoShot.Localization.Editor.Tabs
                     return;
                 }
 
+                newLocalKey = LocalizationTextEditorPopup.FilterKeyName(newLocalKey);
+                if (string.IsNullOrEmpty(newLocalKey))
+                {
+                    EditorUtility.DisplayDialog("Error", "Key name cannot be empty.", "OK");
+                    return;
+                }
+
                 string newFullKey = prefix + newLocalKey;
 
-                if (Data.Keys.Contains(newFullKey))
+                if (Data.Keys.Any(k => !k.Equals(key, StringComparison.OrdinalIgnoreCase) &&
+                                       k.Equals(newFullKey, StringComparison.OrdinalIgnoreCase)))
                 {
-                    EditorUtility.DisplayDialog("Error", $"Key '{newFullKey}' already exists.", "OK");
+                    EditorUtility.DisplayDialog("Error", $"Key '{newFullKey}' already exists (key names are case-insensitive).", "OK");
                     return;
                 }
 
                 Data.RenameKey(key, newFullKey);
                 Editor.Repaint();
-            });
+            }, isKeyName: true);
         }
 
         private void ClearKeyData()
@@ -771,9 +780,9 @@ namespace PicoShot.Localization.Editor.Tabs
             }
         }
 
-        private static void OpenTextEditor(string text, System.Action<string> onSave)
+        private static void OpenTextEditor(string text, System.Action<string> onSave, bool isKeyName = false)
         {
-            LocalizationTextEditorPopup.Open(text, onSave);
+            LocalizationTextEditorPopup.Open(text, onSave, isKeyName);
         }
 
         private static GUIStyle GetKeyButtonStyle(bool isSelected)

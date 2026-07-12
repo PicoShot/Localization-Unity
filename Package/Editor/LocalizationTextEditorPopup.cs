@@ -13,16 +13,18 @@ namespace PicoShot.Localization
         private Vector2 _scrollPosition;
         private GUIStyle _richTextStyle;
         private bool _focused;
+        private bool _isKeyName;
         private const string TextAreaControlName = "LocalizationTextEditor_TextArea";
 
         private const float WindowWidth = 400f;
         private const float WindowHeight = 300f;
 
-        public static void Open(string initialText, Action<string> saveCallback)
+        public static void Open(string initialText, Action<string> saveCallback, bool isKeyName = false)
         {
-            var window = GetWindow<LocalizationTextEditorPopup>("Text Editor");
+            var window = GetWindow<LocalizationTextEditorPopup>(isKeyName ? "Edit Key Name" : "Text Editor");
             window._text = initialText;
             window._onSave = saveCallback;
+            window._isKeyName = isKeyName;
             window._focused = false;
             window.minSize = new Vector2(WindowWidth, WindowHeight);
             window.maxSize = new Vector2(WindowWidth * 2, WindowHeight * 2);
@@ -46,6 +48,23 @@ namespace PicoShot.Localization
         private static string RemoveRichText(string input)
         {
             return Regex.Replace(input, @"<color=.*?>|</color>", "");
+        }
+
+        /// <summary>
+        /// Removes any character that is not a letter, digit, underscore or dot.
+        /// </summary>
+        public static string FilterKeyName(string input)
+        {
+            if (string.IsNullOrEmpty(input))
+                return input;
+
+            var sb = new StringBuilder(input.Length);
+            foreach (char c in input)
+            {
+                if (char.IsLetterOrDigit(c) || c == '_' || c == '.')
+                    sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private static string ApplySyntaxHighlighting(string input)
@@ -123,6 +142,8 @@ namespace PicoShot.Localization
             if (newText != displayText)
             {
                 _text = RemoveRichText(newText);
+                if (_isKeyName)
+                    _text = FilterKeyName(_text);
             }
 
             EditorGUILayout.EndScrollView();

@@ -14,7 +14,7 @@ namespace PicoShot.Localization
         private Key(string value)
         {
             Value = value;
-            Hash = Hash64.Create(value);
+            Hash = Hash64.Create(value?.ToLowerInvariant());
         }
 
         private Key(long hash)
@@ -40,7 +40,7 @@ namespace PicoShot.Localization
         }
         public bool Equals(string other)
         {
-            return Hash == Hash64.Create(other);
+            return Hash == Hash64.Create(other?.ToLowerInvariant());
         }
 
         public static implicit operator string(Key key) => key.Value ?? key.Hash.ToString();

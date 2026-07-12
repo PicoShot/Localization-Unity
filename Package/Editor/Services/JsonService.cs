@@ -348,8 +348,10 @@ namespace PicoShot.Localization.Editor.Services
 
                 foreach (var kvp in importData)
                 {
-                    string key = kvp.Key.Trim();
+                    string importKey = kvp.Key.Trim();
                     var langData = kvp.Value;
+
+                    string key = _data.Keys.FirstOrDefault(k => k.Equals(importKey, StringComparison.OrdinalIgnoreCase)) ?? importKey;
 
                     if (!_data.LanguageData.TryGetValue(key, out var keyData))
                     {
@@ -441,8 +443,10 @@ namespace PicoShot.Localization.Editor.Services
 
                 foreach (var kvp in importData)
                 {
-                    string key = prefix + kvp.Key.Trim();
+                    string importKey = prefix + kvp.Key.Trim();
                     var langData = kvp.Value;
+
+                    string key = _data.Keys.FirstOrDefault(k => k.Equals(importKey, StringComparison.OrdinalIgnoreCase)) ?? importKey;
 
                     if (!_data.LanguageData.TryGetValue(key, out var keyData))
                     {

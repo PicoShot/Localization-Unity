@@ -155,11 +155,11 @@ namespace PicoShot.Localization.Editor.Data
 
             var query = Keys.AsEnumerable();
 
-            // Filter by table first
+            // Filter by table first (case-insensitive)
             if (!string.IsNullOrEmpty(SelectedTable))
             {
                 string tablePrefix = SelectedTable + ".";
-                query = query.Where(key => key.StartsWith(tablePrefix));
+                query = query.Where(key => key.StartsWith(tablePrefix, StringComparison.OrdinalIgnoreCase));
             }
 
             if (hasFilter)
@@ -177,11 +177,17 @@ namespace PicoShot.Localization.Editor.Data
         }
 
         /// <summary>
-        /// Gets all unique tables from existing keys.
+        /// Gets all unique tables from existing keys (case-insensitive, preserving first-seen casing).
         /// </summary>
         public IEnumerable<string> GetTables()
         {
-            return Keys.Where(k => k.Contains('.')).Select(k => k.Substring(0, k.IndexOf('.'))).Distinct().OrderBy(t => t);
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var key in Keys.Where(k => k.Contains('.')))
+            {
+                string table = key.Substring(0, key.IndexOf('.'));
+                if (seen.Add(table))
+                    yield return table;
+            }
         }
 
         /// <summary>
@@ -330,12 +336,12 @@ namespace PicoShot.Localization.Editor.Data
         }
 
         /// <summary>
-        /// Adds a new key to the data.
+        /// Adds a new key to the data. Key names must be unique regardless of casing.
         /// </summary>
         public bool AddKey(string key, bool isArray)
         {
             key = key?.Trim();
-            if (string.IsNullOrEmpty(key) || Keys.Contains(key))
+            if (string.IsNullOrEmpty(key) || Keys.Any(k => k.Equals(key, StringComparison.OrdinalIgnoreCase)))
                 return false;
 
             Keys.Add(key);
@@ -389,12 +395,16 @@ namespace PicoShot.Localization.Editor.Data
         }
 
         /// <summary>
-        /// Renames a key while preserving its data.
+        /// Renames a key while preserving its data. Key names must be unique regardless of casing.
         /// </summary>
         public bool RenameKey(string oldKey, string newKey)
         {
             newKey = newKey?.Trim();
-            if (!Keys.Contains(oldKey) || Keys.Contains(newKey))
+            if (!Keys.Contains(oldKey))
+                return false;
+
+            if (Keys.Any(k => !k.Equals(oldKey, StringComparison.OrdinalIgnoreCase) &&
+                               k.Equals(newKey, StringComparison.OrdinalIgnoreCase)))
                 return false;
 
             int index = Keys.IndexOf(oldKey);

@@ -28,7 +28,8 @@ namespace PicoShot.Localization
             int i = 0;
             foreach (var entry in data)
             {
-                temp[i++] = (Hash64.Create(entry.Key), entry.Key, entry.Value);
+                string key = entry.Key;
+                temp[i++] = (Hash64.Create(key?.ToLowerInvariant()), key, entry.Value);
             }
 
             Array.Sort(temp, (a, b) => a.hash.CompareTo(b.hash));

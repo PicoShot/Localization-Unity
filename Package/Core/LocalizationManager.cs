@@ -601,7 +601,7 @@ namespace PicoShot.Localization
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long GetKeyHash(string key)
         {
-            return Hash64.Create(key);
+            return Hash64.Create(key?.ToLowerInvariant());
         }
 
         /// <summary>
@@ -647,6 +647,7 @@ namespace PicoShot.Localization
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static string GetRawText(string key)
         {
+            key = key?.ToLowerInvariant();
             long keyHash = Hash64.Create(key);
 
             int foundIndex = -1;
@@ -732,6 +733,8 @@ namespace PicoShot.Localization
                 Initialize();
             }
 
+            key = key.ToLowerInvariant();
+
             if (_arrayCache.TryGetValue(key, out var cached))
                 return cached;
 
@@ -762,6 +765,7 @@ namespace PicoShot.Localization
         /// </summary>
         public static string GetArrayText(string key, int index)
         {
+            key = key?.ToLowerInvariant();
             var array = GetArray(key);
 
             if (array == null || array.Length == 0)
@@ -877,6 +881,7 @@ namespace PicoShot.Localization
         /// </summary>
         public static bool HasKey(string key)
         {
+            key = key?.ToLowerInvariant();
             return _currentLanguageData?.ContainsKey(key) ?? false;
         }
 
@@ -885,6 +890,7 @@ namespace PicoShot.Localization
         /// </summary>
         public static bool HasKeyInDefault(string key)
         {
+            key = key?.ToLowerInvariant();
             return _fallbackLanguageData?.ContainsKey(key) ?? false;
         }
 

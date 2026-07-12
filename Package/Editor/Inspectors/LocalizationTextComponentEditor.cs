@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
@@ -41,10 +42,10 @@ namespace PicoShot.Localization.Editor.Inspectors
             
             if (!string.IsNullOrEmpty(fullKey) && fullKey.Contains("."))
             {
-                string table = fullKey.Substring(0, fullKey.IndexOf('.'));
-                if (_availableTables.Contains(table))
+                string table = fullKey.Substring(0, fullKey.IndexOf('.')).ToLowerInvariant();
+                if (_availableTables.Any(t => t.Equals(table, StringComparison.OrdinalIgnoreCase)))
                 {
-                    _selectedTable = table;
+                    _selectedTable = _availableTables.First(t => t.Equals(table, StringComparison.OrdinalIgnoreCase));
                     UpdateDisplayKeys();
                 }
             }
@@ -154,7 +155,7 @@ namespace PicoShot.Localization.Editor.Inspectors
             string currentFullKey = _translationKeyProp.stringValue ?? "";
             string currentDisplayKey = currentFullKey;
             
-            if (_selectedTable != "All Keys" && currentFullKey.StartsWith(_selectedTable + "."))
+            if (_selectedTable != "All Keys" && currentFullKey.StartsWith(_selectedTable + ".", StringComparison.OrdinalIgnoreCase))
             {
                 currentDisplayKey = currentFullKey.Substring(_selectedTable.Length + 1);
             }

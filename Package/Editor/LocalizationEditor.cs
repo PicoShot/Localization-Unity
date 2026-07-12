@@ -312,6 +312,9 @@ namespace PicoShot.Localization
                             string key = entry.Key;
                             object value = entry.Value;
 
+                            if (string.IsNullOrEmpty(key))
+                                continue;
+
                             if (!_data.LanguageData.TryGetValue(key, out var keyData))
                             {
                                 keyData = new Dictionary<string, object>(_data.LanguageCodes.Count);
