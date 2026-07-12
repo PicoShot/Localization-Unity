@@ -134,7 +134,7 @@ namespace PicoShot.Localization
         private static HashSet<string> _allTranslationKeys;
         private static HashSet<string> _availableLanguages;
 
-        private static readonly Dictionary<string, string[]> _arrayCache = new(StringComparer.Ordinal);
+        private static readonly Dictionary<long, string[]> _arrayCache = new();
 
         #endregion
 
@@ -613,7 +613,7 @@ namespace PicoShot.Localization
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static long GetKeyHash(string key)
         {
-            return Hash64.Create(key?.ToLowerInvariant());
+            return Hash64.CreateIgnoreCase(key);
         }
 
         /// <summary>
@@ -659,20 +659,23 @@ namespace PicoShot.Localization
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static string GetRawText(string key)
         {
-            key = key?.ToLowerInvariant();
-            long keyHash = Hash64.Create(key);
+            if (string.IsNullOrEmpty(key))
+                return string.Empty;
+
+            ReadOnlySpan<char> keySpan = key.AsSpan();
+            long keyHash = Hash64.CreateIgnoreCase(keySpan);
 
             int foundIndex = -1;
-            if (key[^1] == ']')
+            if (keySpan[keySpan.Length - 1] == ']')
             {
-                for (int i = key.Length - 1; i >= 0; i--)
+                for (int i = keySpan.Length - 1; i >= 0; i--)
                 {
-                    if (key[i] != '[')
+                    if (keySpan[i] != '[')
                         continue;
 
-                    if (int.TryParse(key.AsSpan(i + 1, key.Length - (i + 2)), out int idx))
+                    if (int.TryParse(keySpan.Slice(i + 1, keySpan.Length - (i + 2)), out int idx))
                     {
-                        keyHash = Hash64.Create(key.AsSpan(0, i));
+                        keyHash = Hash64.CreateIgnoreCase(keySpan.Slice(0, i));
                         foundIndex = idx;
                     }
 
@@ -745,12 +748,12 @@ namespace PicoShot.Localization
                 Initialize();
             }
 
-            key = key.ToLowerInvariant();
+            long keyHash = Hash64.CreateIgnoreCase(key);
 
-            if (_arrayCache.TryGetValue(key, out var cached))
+            if (_arrayCache.TryGetValue(keyHash, out var cached))
                 return cached;
 
-            var array = GetArrayInternal(key);
+            var array = GetArrayInternal(Key.FromHash(keyHash));
 
             if (array == null)
                 return null;
@@ -763,7 +766,7 @@ namespace PicoShot.Localization
                 }
             }
 
-            _arrayCache[key] = array;
+            _arrayCache[keyHash] = array;
             return array;
         }
 
@@ -777,7 +780,6 @@ namespace PicoShot.Localization
         /// </summary>
         public static string GetArrayText(string key, int index)
         {
-            key = key?.ToLowerInvariant();
             var array = GetArray(key);
 
             if (array == null || array.Length == 0)
@@ -893,8 +895,7 @@ namespace PicoShot.Localization
         /// </summary>
         public static bool HasKey(string key)
         {
-            key = key?.ToLowerInvariant();
-            return _currentLanguageData?.ContainsKey(key) ?? false;
+            return _currentLanguageData?.ContainsKey(Hash64.CreateIgnoreCase(key)) ?? false;
         }
 
         /// <summary>
@@ -902,8 +903,7 @@ namespace PicoShot.Localization
         /// </summary>
         public static bool HasKeyInDefault(string key)
         {
-            key = key?.ToLowerInvariant();
-            return _fallbackLanguageData?.ContainsKey(key) ?? false;
+            return _fallbackLanguageData?.ContainsKey(Hash64.CreateIgnoreCase(key)) ?? false;
         }
 
         /// <summary>

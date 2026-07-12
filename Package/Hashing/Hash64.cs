@@ -24,6 +24,24 @@ namespace PicoShot.Localization.Hashing
 
             return (long)hash;
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static long CreateIgnoreCase(ReadOnlySpan<char> buffer)
+        {
+            if (buffer.IsEmpty)
+                return 0L;
+
+            ulong hash = FNV_OFFSET_BASIS;
+
+            foreach (char c in buffer)
+            {
+                hash ^= char.ToLowerInvariant(c);
+                hash *= FNV_PRIME;
+            }
+
+            return (long)hash;
+        }
+
         public static long Create(ReadOnlySpan<byte> buffer)
         {
             if (buffer.IsEmpty)

@@ -29,7 +29,7 @@ namespace PicoShot.Localization
             foreach (var entry in data)
             {
                 string key = entry.Key;
-                temp[i++] = (Hash64.Create(key?.ToLowerInvariant()), key, entry.Value);
+                temp[i++] = (Hash64.CreateIgnoreCase(key), key, entry.Value);
             }
 
             Array.Sort(temp, (a, b) => a.hash.CompareTo(b.hash));
