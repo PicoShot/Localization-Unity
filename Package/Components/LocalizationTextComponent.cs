@@ -472,7 +472,7 @@ namespace PicoShot.Localization
         [ContextMenu("Switch language")]
         private void ChangeLanguage()
         {
-            var languages = System.Linq.Enumerable.ToList(System.Linq.Enumerable.OrderBy(LocalizationManager.GetAvailableLanguageCodes(), l => l));
+            var languages = LocalizationManager.GetAvailableLanguageCodes().OrderBy(l => l).ToList();
             if (languages.Count == 0) return;
 
             string current = LocalizationManager.CurrentLanguage;
