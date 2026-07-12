@@ -412,13 +412,21 @@ namespace PicoShot.Localization
             return DefaultLanguage;
         }
 
-        private static void TriggerFontChanged()
+        /// <summary>
+        /// Resolves the currently active TMP and legacy fonts based on the config and current language.
+        /// </summary>
+        public static void GetCurrentFonts(out TMP_FontAsset tmpFont, out Font legacyFont)
         {
             var config = LocalizationConfigProvider.Config;
-            if (config == null || !config.IsFontSystemEnabled) return;
+            if (config == null || !config.IsFontSystemEnabled)
+            {
+                tmpFont = null;
+                legacyFont = null;
+                return;
+            }
 
-            TMP_FontAsset tmpFont = config.DefaultTMPFont;
-            Font legacyFont = config.DefaultLegacyFont;
+            tmpFont = config.DefaultTMPFont;
+            legacyFont = config.DefaultLegacyFont;
 
             foreach (var mapping in config.FontMappings)
             {
@@ -429,7 +437,11 @@ namespace PicoShot.Localization
                     break;
                 }
             }
+        }
 
+        private static void TriggerFontChanged()
+        {
+            GetCurrentFonts(out var tmpFont, out var legacyFont);
             OnFontChanged?.Invoke(tmpFont, legacyFont);
         }
 

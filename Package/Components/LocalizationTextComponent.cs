@@ -156,6 +156,10 @@ namespace PicoShot.Localization
             {
                 UpdateText();
             }
+
+            // Apply the current font immediately in case the font-changed event was fired before this component subscribed.
+            LocalizationManager.GetCurrentFonts(out var tmpFont, out var legacyFont);
+            UpdateFont(tmpFont, legacyFont);
         }
 
         private void OnDisable()
