@@ -68,12 +68,12 @@ namespace PicoShot.Localization.Editor.Tabs
             var tables = new List<string> { "All Keys" };
             tables.AddRange(Data.GetTables());
 
-            if (!string.IsNullOrEmpty(Data.SelectedTable) && !tables.Contains(Data.SelectedTable))
+            if (!string.IsNullOrEmpty(Data.SelectedTable) && !tables.Any(t => t.Equals(Data.SelectedTable, StringComparison.OrdinalIgnoreCase)))
             {
                 tables.Add(Data.SelectedTable);
             }
 
-            int currentIndex = string.IsNullOrEmpty(Data.SelectedTable) ? 0 : tables.IndexOf(Data.SelectedTable);
+            int currentIndex = string.IsNullOrEmpty(Data.SelectedTable) ? 0 : tables.FindIndex(t => t.Equals(Data.SelectedTable, StringComparison.OrdinalIgnoreCase));
             if (currentIndex < 0) currentIndex = 0;
 
             string[] displayNames = tables.Select(t => t == "All Keys" ? t : t.ToUpperInvariant()).ToArray();
