@@ -61,7 +61,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private void DrawTableSelectionSection()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Tables", EditorStyles.boldLabel);
+            EditorGUILayout.LabelField("Views", EditorStyles.boldLabel);
 
             EditorGUILayout.BeginHorizontal();
             var tables = new List<string> { "All Keys" };
