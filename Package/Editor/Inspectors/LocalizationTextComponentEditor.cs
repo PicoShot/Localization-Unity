@@ -82,7 +82,7 @@ namespace PicoShot.Localization.Editor.Inspectors
             else
             {
                 string prefix = _selectedTable + ".";
-                var filtered = _availableKeys.Where(k => k.StartsWith(prefix)).ToList();
+                var filtered = _availableKeys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
                 foreach(var key in filtered)
                 {
                     _displayKeys.Add(key.Substring(prefix.Length));

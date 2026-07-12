@@ -380,7 +380,7 @@ namespace PicoShot.Localization.Editor.Data
             if (string.IsNullOrEmpty(table)) return;
             
             string prefix = table + ".";
-            var keysToRemove = Keys.Where(k => k.StartsWith(prefix)).ToList();
+            var keysToRemove = Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
             
             foreach (var k in keysToRemove)
             {

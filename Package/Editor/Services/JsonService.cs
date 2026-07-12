@@ -236,7 +236,7 @@ namespace PicoShot.Localization.Editor.Services
 
             if (string.IsNullOrEmpty(path)) return;
             
-            var tableKeys = _data.Keys.Where(k => k.StartsWith(prefix)).ToList();
+            var tableKeys = _data.Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
             
             try
             {
