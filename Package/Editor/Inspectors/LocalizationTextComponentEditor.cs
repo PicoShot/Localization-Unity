@@ -182,10 +182,11 @@ namespace PicoShot.Localization.Editor.Inspectors
                         _translationKeyProp.stringValue = newFullKey;
                         serializedObject.ApplyModifiedProperties();
                         
-                        // Force update text in editor if playing or if we have an OnValidate
+                        // Force update text preview in Edit Mode.
                         if (!Application.isPlaying)
                         {
-                            component.TranslationKey = newFullKey;
+                            component.UpdateText();
+                            EditorUtility.SetDirty(component);
                         }
                     }
                 });
