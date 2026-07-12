@@ -18,8 +18,6 @@ namespace PicoShot.Localization.Editor.Tabs
         private bool _isResizingKeysList;
         private string _newKey = "";
         private string _newValue = "";
-        private string _newTable = "";
-        private bool _isCreatingTable = false;
         private bool _pendingDelete;
         private float _keysListViewportHeight;
 
@@ -77,7 +75,9 @@ namespace PicoShot.Localization.Editor.Tabs
             int currentIndex = string.IsNullOrEmpty(Data.SelectedTable) ? 0 : tables.IndexOf(Data.SelectedTable);
             if (currentIndex < 0) currentIndex = 0;
 
-            int newIndex = EditorGUILayout.Popup(currentIndex, tables.ToArray());
+            string[] displayNames = tables.Select(t => t == "All Keys" ? t : t.ToUpperInvariant()).ToArray();
+
+            int newIndex = EditorGUILayout.Popup(currentIndex, displayNames);
             if (newIndex != currentIndex)
             {
                 Data.SelectedTable = newIndex == 0 ? "" : tables[newIndex];
@@ -87,13 +87,6 @@ namespace PicoShot.Localization.Editor.Tabs
 
             if (!string.IsNullOrEmpty(Data.SelectedTable))
             {
-                GUI.backgroundColor = Color.red;
-                if (GUILayout.Button("Delete Table", GUILayout.Width(90)))
-                {
-                    ConfirmDeleteTable(Data.SelectedTable);
-                }
-                GUI.backgroundColor = Color.white;
-
                 if (GUILayout.Button("Export JSON", GUILayout.Width(85)))
                 {
                     _jsonService.ExportTableToJson(Data.SelectedTable);
@@ -106,30 +99,7 @@ namespace PicoShot.Localization.Editor.Tabs
                     GUIUtility.ExitGUI();
                 }
             }
-
-            if (GUILayout.Button(_isCreatingTable ? "Cancel" : "New Table...", GUILayout.Width(100)))
-            {
-                _isCreatingTable = !_isCreatingTable;
-                _newTable = "";
-            }
             EditorGUILayout.EndHorizontal();
-
-            if (_isCreatingTable)
-            {
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("Table Name:", GUILayout.Width(80));
-                _newTable = EditorGUILayout.TextField(_newTable);
-                if (GUILayout.Button("Create", GUILayout.Width(60)))
-                {
-                    if (!string.IsNullOrWhiteSpace(_newTable) && !_newTable.Contains("."))
-                    {
-                        Data.SelectedTable = _newTable.Trim();
-                        _isCreatingTable = false;
-                        GUI.FocusControl(null);
-                    }
-                }
-                EditorGUILayout.EndHorizontal();
-            }
 
             EditorGUILayout.EndVertical();
         }
@@ -673,16 +643,6 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 Data.RemoveKey(Data.SelectedKey);
                 Data.SelectedKey = "";
-                Editor.Repaint();
-            }
-        }
-
-        private void ConfirmDeleteTable(string table)
-        {
-            if (EditorUtility.DisplayDialog("Delete Table",
-                    $"Are you sure you want to delete the table '{table}' and ALL its keys?\nThis cannot be undone!", "Yes, Delete All", "Cancel"))
-            {
-                Data.RemoveTable(table);
                 Editor.Repaint();
             }
         }
