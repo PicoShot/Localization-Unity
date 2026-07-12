@@ -1120,6 +1120,7 @@ namespace PicoShot.Localization
         public static void Dispose()
         {
             OnLanguageChanged = null;
+            OnFontChanged = null;
             OnLanguageLoadError = null;
             OnMissingTranslation = null;
 
