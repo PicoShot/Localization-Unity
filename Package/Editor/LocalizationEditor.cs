@@ -100,18 +100,22 @@ namespace PicoShot.Localization
         {
             HandleKeyboardInput();
 
-            DrawHeader();
-            DrawTabs();
-
-            EditorGUILayout.Space();
-
-            if (_tabs.TryGetValue(_currentTab, out var tab))
+            EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             {
-                tab.Draw();
-            }
+                DrawHeader();
+                DrawTabs();
 
-            EditorGUILayout.Space();
-            DrawSaveButton();
+                EditorGUILayout.Space();
+
+                if (_tabs.TryGetValue(_currentTab, out var tab))
+                {
+                    tab.Draw();
+                }
+
+                EditorGUILayout.Space();
+                DrawSaveButton();
+            }
+            EditorGUILayout.EndVertical();
         }
 
         #endregion

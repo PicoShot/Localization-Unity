@@ -21,6 +21,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private string _newTable = "";
         private bool _isCreatingTable = false;
         private bool _pendingDelete;
+        private float _keysListViewportHeight;
 
         private static Texture2D _transparentTexture;
         private static GUIStyle _keyButtonStyleNormal;
@@ -36,7 +37,8 @@ namespace PicoShot.Localization.Editor.Tabs
 
         public override void Draw()
         {
-            // Add key and filter section
+            EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
+
             using (BeginBox())
             {
                 DrawTableSelectionSection();
@@ -46,12 +48,16 @@ namespace PicoShot.Localization.Editor.Tabs
 
             EditorGUILayout.Space();
 
-            // Split view
-            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.BeginHorizontal(
+                GUILayout.ExpandHeight(true),
+                GUILayout.MinHeight(120f),
+                GUILayout.MaxHeight(float.MaxValue));
             DrawKeysListPanel();
             DrawResizeHandle();
             DrawKeyDetailsPanel();
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.EndVertical();
         }
 
         private void DrawTableSelectionSection()
@@ -62,12 +68,12 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.BeginHorizontal();
             var tables = new List<string> { "All Keys" };
             tables.AddRange(Data.GetTables());
-            
+
             if (!string.IsNullOrEmpty(Data.SelectedTable) && !tables.Contains(Data.SelectedTable))
             {
                 tables.Add(Data.SelectedTable);
             }
-            
+
             int currentIndex = string.IsNullOrEmpty(Data.SelectedTable) ? 0 : tables.IndexOf(Data.SelectedTable);
             if (currentIndex < 0) currentIndex = 0;
 
@@ -87,13 +93,13 @@ namespace PicoShot.Localization.Editor.Tabs
                     ConfirmDeleteTable(Data.SelectedTable);
                 }
                 GUI.backgroundColor = Color.white;
-                
+
                 if (GUILayout.Button("Export JSON", GUILayout.Width(85)))
                 {
                     _jsonService.ExportTableToJson(Data.SelectedTable);
                     GUIUtility.ExitGUI();
                 }
-                
+
                 if (GUILayout.Button("Import JSON", GUILayout.Width(85)))
                 {
                     _jsonService.ImportTableFromJson(Data.SelectedTable);
@@ -131,8 +137,8 @@ namespace PicoShot.Localization.Editor.Tabs
         private void DrawAddKeySection()
         {
             EditorGUILayout.BeginVertical("box");
-            string title = string.IsNullOrEmpty(Data.SelectedTable) 
-                ? "Add New Key" 
+            string title = string.IsNullOrEmpty(Data.SelectedTable)
+                ? "Add New Key"
                 : $"Add New Key to '{Data.SelectedTable}'";
             EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
 
@@ -162,7 +168,6 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             EditorGUILayout.BeginVertical("box");
 
-            // Search
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Search Keys:", GUILayout.Width(80));
             Data.KeySearchFilter = EditorGUILayout.TextField(Data.KeySearchFilter);
@@ -173,7 +178,6 @@ namespace PicoShot.Localization.Editor.Tabs
             }
             EditorGUILayout.EndHorizontal();
 
-            // Filters
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Filter:", GUILayout.Width(80));
 
@@ -195,7 +199,6 @@ namespace PicoShot.Localization.Editor.Tabs
 
             EditorGUILayout.EndHorizontal();
 
-            // Count
             var totalKeys = Data.Keys.Count;
             var filteredCount = Data.GetFilteredKeys().Count();
             EditorGUILayout.BeginHorizontal();
@@ -208,21 +211,28 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private void DrawKeysListPanel()
         {
-            EditorGUILayout.BeginVertical("box", GUILayout.Width(Data.KeysListPanelWidth));
+            EditorGUILayout.BeginVertical(
+                "box",
+                GUILayout.Width(Data.KeysListPanelWidth),
+                GUILayout.ExpandHeight(true),
+                GUILayout.MaxHeight(float.MaxValue));
             EditorGUILayout.LabelField("Keys", EditorStyles.boldLabel);
 
             var filteredKeys = Data.GetFilteredKeys().ToList();
             int totalKeyCount = filteredKeys.Count;
 
-            float viewportHeight = WindowPosition.height - 300f;
-            int maxVisibleItems = Mathf.CeilToInt(viewportHeight / LanguageEditorData.KeyItemHeight) + 1;
-
-            Rect scrollViewRect = EditorGUILayout.GetControlRect(
-                false,
-                viewportHeight,
+            Rect scrollViewRect = GUILayoutUtility.GetRect(
+                0f,
+                float.MaxValue,
+                0f,
+                float.MaxValue,
                 GUILayout.ExpandWidth(true),
-                GUILayout.ExpandHeight(false)
+                GUILayout.ExpandHeight(true)
             );
+            scrollViewRect.height = Mathf.Max(scrollViewRect.height, 50f);
+            _keysListViewportHeight = scrollViewRect.height;
+
+            int maxVisibleItems = Mathf.CeilToInt(scrollViewRect.height / LanguageEditorData.KeyItemHeight) + 1;
 
             float totalContentHeight = totalKeyCount * LanguageEditorData.KeyItemHeight;
             Data.KeysListScroll = GUI.BeginScrollView(
@@ -275,10 +285,12 @@ namespace PicoShot.Localization.Editor.Tabs
             const float handleWidth = 5f;
             Rect handleRect = EditorGUILayout.GetControlRect(
                 false,
-                WindowPosition.height - 300f,
+                0f,
                 GUILayout.Width(handleWidth),
-                GUILayout.ExpandHeight(false)
+                GUILayout.ExpandHeight(true),
+                GUILayout.MaxHeight(float.MaxValue)
             );
+            handleRect.height = Mathf.Max(handleRect.height, 50f);
 
             EditorGUIUtility.AddCursorRect(handleRect, MouseCursor.ResizeHorizontal);
 
@@ -314,7 +326,10 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private void DrawKeyDetailsPanel()
         {
-            EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true));
+            EditorGUILayout.BeginVertical(
+                GUILayout.ExpandWidth(true),
+                GUILayout.ExpandHeight(true),
+                GUILayout.MaxHeight(float.MaxValue));
 
             if (Data.LastSelectedKey != Data.SelectedKey)
             {
@@ -325,7 +340,10 @@ namespace PicoShot.Localization.Editor.Tabs
             if (!string.IsNullOrEmpty(Data.SelectedKey))
             {
                 EditorGUILayout.LabelField($"Key Details: {Data.SelectedKey}", EditorStyles.boldLabel);
-                Data.KeyDetailsScroll = EditorGUILayout.BeginScrollView(Data.KeyDetailsScroll, GUILayout.ExpandHeight(true));
+                Data.KeyDetailsScroll = EditorGUILayout.BeginScrollView(
+                    Data.KeyDetailsScroll,
+                    GUILayout.ExpandHeight(true),
+                    GUILayout.MaxHeight(float.MaxValue));
 
                 DrawTranslationHintField();
                 EditorGUILayout.Space(5);
@@ -682,7 +700,6 @@ namespace PicoShot.Localization.Editor.Tabs
                 case KeyCode.UpArrow:
                     if (ctrlPressed && index > 0)
                     {
-                        // Move key up
                         string key = Data.SelectedKey;
                         Data.Keys.RemoveAt(index);
                         Data.Keys.Insert(index - 1, key);
@@ -700,7 +717,6 @@ namespace PicoShot.Localization.Editor.Tabs
                 case KeyCode.DownArrow:
                     if (ctrlPressed && index < Data.Keys.Count - 1)
                     {
-                        // Move key down
                         string key = Data.SelectedKey;
                         Data.Keys.RemoveAt(index);
                         Data.Keys.Insert(index + 1, key);
@@ -781,7 +797,7 @@ namespace PicoShot.Localization.Editor.Tabs
             if (selectedIndex < 0)
                 return;
 
-            float viewportHeight = WindowPosition.height - 300f;
+            float viewportHeight = Mathf.Max(_keysListViewportHeight, LanguageEditorData.KeyItemHeight);
             float itemTop = selectedIndex * LanguageEditorData.KeyItemHeight;
             float itemBottom = itemTop + LanguageEditorData.KeyItemHeight;
 
