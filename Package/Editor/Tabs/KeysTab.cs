@@ -621,14 +621,12 @@ namespace PicoShot.Localization.Editor.Tabs
 
                 string newFullKey = prefix + newLocalKey;
 
-                if (Data.Keys.Any(k => !k.Equals(key, StringComparison.OrdinalIgnoreCase) &&
-                                       k.Equals(newFullKey, StringComparison.OrdinalIgnoreCase)))
+                if (!Data.RenameKey(key, newFullKey))
                 {
                     EditorUtility.DisplayDialog("Error", $"Key '{newFullKey}' already exists (key names are case-insensitive).", "OK");
                     return;
                 }
 
-                Data.RenameKey(key, newFullKey);
                 Editor.Repaint();
             }, isKeyName: true);
         }
