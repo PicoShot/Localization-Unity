@@ -104,7 +104,7 @@ namespace PicoShot.Localization
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGetValue(string key, out object value) =>
-            TryGetValue(Hash64.Create(key), out value);
+            TryGetValue(Hash64.CreateIgnoreCase(key), out value);
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ContainsKey(long keyHash)
@@ -122,6 +122,6 @@ namespace PicoShot.Localization
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool ContainsKey(string key) =>
-            ContainsKey(Hash64.Create(key));
+            ContainsKey(Hash64.CreateIgnoreCase(key));
     }
 }
