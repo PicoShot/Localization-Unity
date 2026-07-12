@@ -51,7 +51,7 @@ namespace PicoShot.Localization
         }
 
         /// <summary>
-        /// Removes any character that is not a letter, digit, underscore or dot.
+        /// Removes any character that is not an ASCII letter, digit, underscore or dot.
         /// </summary>
         public static string FilterKeyName(string input)
         {
@@ -61,7 +61,7 @@ namespace PicoShot.Localization
             var sb = new StringBuilder(input.Length);
             foreach (char c in input)
             {
-                if (char.IsLetterOrDigit(c) || c == '_' || c == '.')
+                if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.')
                     sb.Append(c);
             }
             return sb.ToString();
