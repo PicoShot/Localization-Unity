@@ -487,7 +487,7 @@ namespace PicoShot.Localization.Editor.Services
                 _data.HasUnsavedChanges = true;
 
                 EditorUtility.DisplayDialog("Import Successful", 
-                    $"Imported {importData.Count} keys into table '{table}'.", "OK");
+                    $"Imported {importedKeys} new keys and {importedLangs} new languages into table '{table}'.", "OK");
                 Debug.Log($"[LocalizationEditor] Imported JSON into table '{table}': {path}");
             }
             catch (Exception ex)
