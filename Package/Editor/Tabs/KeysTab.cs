@@ -662,21 +662,23 @@ namespace PicoShot.Localization.Editor.Tabs
                 return false;
 
             bool ctrlPressed = (evt.modifiers & EventModifiers.Control) != 0;
-            var index = Data.Keys.IndexOf(Data.SelectedKey);
+            var filteredKeys = Data.GetFilteredKeys().ToList();
+            int filteredIndex = filteredKeys.IndexOf(Data.SelectedKey);
+            int masterIndex = Data.Keys.IndexOf(Data.SelectedKey);
 
             switch (evt.keyCode)
             {
                 case KeyCode.UpArrow:
-                    if (ctrlPressed && index > 0)
+                    if (ctrlPressed && masterIndex > 0)
                     {
                         string key = Data.SelectedKey;
-                        Data.Keys.RemoveAt(index);
-                        Data.Keys.Insert(index - 1, key);
+                        Data.Keys.RemoveAt(masterIndex);
+                        Data.Keys.Insert(masterIndex - 1, key);
                         Data.HasUnsavedChanges = true;
                     }
-                    else if (index > 0)
+                    else if (filteredIndex > 0)
                     {
-                        Data.SelectedKey = Data.Keys[index - 1];
+                        Data.SelectedKey = filteredKeys[filteredIndex - 1];
                     }
                     AutoScrollToSelectedKey();
                     evt.Use();
@@ -684,16 +686,16 @@ namespace PicoShot.Localization.Editor.Tabs
                     return true;
 
                 case KeyCode.DownArrow:
-                    if (ctrlPressed && index < Data.Keys.Count - 1)
+                    if (ctrlPressed && masterIndex < Data.Keys.Count - 1)
                     {
                         string key = Data.SelectedKey;
-                        Data.Keys.RemoveAt(index);
-                        Data.Keys.Insert(index + 1, key);
+                        Data.Keys.RemoveAt(masterIndex);
+                        Data.Keys.Insert(masterIndex + 1, key);
                         Data.HasUnsavedChanges = true;
                     }
-                    else if (index < Data.Keys.Count - 1)
+                    else if (filteredIndex < filteredKeys.Count - 1)
                     {
-                        Data.SelectedKey = Data.Keys[index + 1];
+                        Data.SelectedKey = filteredKeys[filteredIndex + 1];
                     }
                     AutoScrollToSelectedKey();
                     evt.Use();
