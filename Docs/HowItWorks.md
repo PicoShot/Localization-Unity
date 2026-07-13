@@ -184,27 +184,41 @@ bool isRtl = LanguageDefinitions.IsRightToLeft("ar");
 // Checks if language code is in RightToLeftLanguages HashSet
 ```
 
-### Processing Pipeline
+### Processing Pipeline (Standard RTL)
 
 ```
 Arabic Text Input
     └─► TashkeelHandler (optional)
-    │   └─► Remove diacritical marks (if ShowTashkeel = false)
-    │   └─► Store positions for restoration
+    │   └─► Remove diacritical marks
     │
-    └─► ArabicLetterConverter
-    │   └─► Convert general forms to isolated forms
-    │
-    └─► ArabicGlyphConnector
-    │   └─► Determine letter positions in words
+    └─► ArabicLetterConverter & Connector
     │   └─► Apply contextual forms (initial, medial, final)
-    │   └─► Handle Lam-Alef ligature
-    │
-    └─► TashkeelHandler (restore)
-    │   └─► Insert diacritical marks back
     │
     └─► Text Reversal
         └─► Reverse character order for display
+```
+
+### Token-Based Mixed Text Processing
+
+When **Mixed LTR/RTL Support** is enabled, a smart tokenizer wraps the standard processing pipeline to safely handle texts containing multiple languages:
+
+```
+Mixed Text Input: "Hello (مرحبا) World"
+    └─► Tokenizer
+    │   └─► Token 1: "Hello ("  (LTR)
+    │   └─► Token 2: "مرحبا"    (RTL)
+    │   └─► Token 3: ") World"  (LTR)
+    │
+    └─► Neutral Resolution
+    │   └─► Punctuation aligns with surrounding languages
+    │
+    └─► Processing
+    │   └─► Process Token 2 via Standard RTL Pipeline (Reshape & Reverse)
+    │   └─► Ignore Token 1 & 3
+    │
+    └─► Bi-Directional Assembly
+        └─► LTR Main Language: [Token 1] + [Token 2 Fixed] + [Token 3]
+        └─► Output: "Hello (ابحرم) World"
 ```
 
 ### Why This Matters

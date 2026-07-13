@@ -19,6 +19,7 @@ A lightweight, zero-runtime-dependency, high-performance localization system for
 - **Editor Tools** - Built-in Language Editor with DeepL/Gemini translation integration
 - **Multiple Component Support** - Works with TMP_Text, TMP_Dropdown, Legacy UI, and TextMesh
 - **Format Parameters** - String formatting support with `{0}`, `{1}` placeholders
+- **Mixed LTR/RTL Support** - Smart token-based bi-directional text processing for seamless Arabic/Persian integration in English contexts and vice versa
 - **Language-Specific Fonts** - Automatic fallback and language-specific font switching for all localized text components
 - **Virtual Tables** - Organize translation keys into grouped tables via dot-notation with dedicated export/import
 - **Smart Component Inspector** - Searchable dropdown menus for selecting tables and keys directly in the Unity Inspector

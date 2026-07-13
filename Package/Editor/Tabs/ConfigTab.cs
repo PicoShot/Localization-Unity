@@ -84,6 +84,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private void DrawGeneralTab(LocalizationConfig config)
         {
             DrawDefaultLanguageSection(config);
+            DrawTextProcessingSettings(config);
             DrawCompressionSettings(config);
             DrawProtectionSettings(config);
         }
@@ -115,6 +116,28 @@ namespace PicoShot.Localization.Editor.Tabs
                 ShowDefaultLanguageDropdown(dropdownRect, config, currentDefault);
             }
             EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space();
+        }
+
+        private void DrawTextProcessingSettings(LocalizationConfig config)
+        {
+            EditorGUILayout.LabelField("Text Processing", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent("Mixed LTR/RTL Support:", "Enable to automatically extract and fix Arabic/Persian/RTL words mixed inside LTR text (and vice-versa) instead of reversing the entire string."), GUILayout.Width(150));
+            bool newSupport = EditorGUILayout.Toggle(config.SupportMixedText);
+            if (newSupport != config.SupportMixedText)
+            {
+                config.SetSupportMixedText(newSupport);
+                LocalizationConfigProvider.SaveConfig();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (config.SupportMixedText)
+            {
+                EditorGUILayout.HelpBox("Token-based Bi-Directional text rendering is enabled. This will dynamically isolate and fix RTL strings without breaking LTR words and punctuation.", MessageType.Info);
+            }
 
             EditorGUILayout.Space();
         }

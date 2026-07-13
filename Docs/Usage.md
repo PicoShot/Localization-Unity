@@ -795,3 +795,29 @@ public static class TestTextNode
     }
 }
 ```
+
+---
+
+## RTL and Mixed Text Support
+
+PicoShot Localization natively supports Right-to-Left (RTL) languages like Arabic, Persian, and Hebrew. Text reshaping and reversal are automatically handled when the current system language is marked as RTL.
+
+### Mixed LTR/RTL Text Handling
+
+When working with dynamic strings that contain both Arabic/Persian words and English words (or vice versa), you can enable the **Mixed LTR/RTL Support** feature in the `Tools > Localization > Language Editor > Settings` tab.
+
+When enabled, the `RtlTextHandler` uses a smart token-based algorithm to:
+1. Parse the string into contiguous LTR, RTL, and Neutral blocks (e.g., punctuation and spaces).
+2. Apply reshaping and reversal **only** to the Arabic/Persian blocks.
+3. Automatically resolve the alignment of punctuation marks depending on their surrounding text.
+4. Render the entire string in the correct visual order based on the main language context (left-to-right for English, right-to-left for Arabic/Persian).
+
+**Example in LTR Context (English):**
+- Logical Input: `Hello (مرحبا) World`
+- Rendered Output: `Hello (ابحرم) World`
+*(The Arabic word is properly reshaped and connected inside the parentheses without breaking the English sentence structure)*
+
+**Example in RTL Context (Persian):**
+- Logical Input: `قیمت 500 تومان`
+- Rendered Output: `ناموت 500 تمیق`
+*(The Persian words are reshaped and placed in correct RTL flow, while the English numbers remain LTR)*

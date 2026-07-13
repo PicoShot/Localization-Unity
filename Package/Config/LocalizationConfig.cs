@@ -61,6 +61,11 @@ namespace PicoShot.Localization.Config
         [SerializeField]
         private string _defaultLanguage = "en";
 
+        [Header("Text Processing")]
+        [Tooltip("Enable dynamic reshaping and bi-directional support for mixed LTR/RTL text")]
+        [SerializeField]
+        private bool _supportMixedText = false;
+
         [Tooltip("Compression mode for BLOC files")]
         [SerializeField]
         private CompressionMode _compressionMode = CompressionMode.Optimal;
@@ -98,6 +103,11 @@ namespace PicoShot.Localization.Config
         /// Default language code.
         /// </summary>
         public string DefaultLanguage => _defaultLanguage;
+
+        /// <summary>
+        /// Whether mixed LTR/RTL text parsing and bi-directional reshaping is enabled.
+        /// </summary>
+        public bool SupportMixedText => _supportMixedText;
 
         /// <summary>
         /// Current compression mode for BLOC files.
@@ -168,9 +178,22 @@ namespace PicoShot.Localization.Config
         /// <summary>
         /// Sets the default language (Editor only).
         /// </summary>
-        public void SetDefaultLanguage(string languageCode)
+        public void SetDefaultLanguage(string langCode)
         {
-            _defaultLanguage = languageCode;
+            if (string.IsNullOrEmpty(langCode) || _defaultLanguage == langCode) return;
+            _defaultLanguage = langCode;
+#if UNITY_EDITOR
+            UnityEditor.EditorUtility.SetDirty(this);
+#endif
+        }
+
+        public void SetSupportMixedText(bool support)
+        {
+            if (_supportMixedText == support) return;
+            _supportMixedText = support;
+#if UNITY_EDITOR
+            UnityEditor.EditorUtility.SetDirty(this);
+#endif
         }
 
         /// <summary>

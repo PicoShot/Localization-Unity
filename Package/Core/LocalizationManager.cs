@@ -562,7 +562,11 @@ namespace PicoShot.Localization
                 text = string.Format(text, resolvedArgs);
             }
 
-            if (IsRightToLeft)
+            if (LocalizationConfigProvider.Config.SupportMixedText)
+            {
+                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
+            }
+            else if (IsRightToLeft)
             {
                 text = RtlTextHandler.Fix(text);
             }
@@ -602,7 +606,11 @@ namespace PicoShot.Localization
                 text = string.Format(text, resolvedArgs);
             }
 
-            if (IsRightToLeft)
+            if (LocalizationConfigProvider.Config.SupportMixedText)
+            {
+                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
+            }
+            else if (IsRightToLeft)
             {
                 text = RtlTextHandler.Fix(text);
             }
@@ -648,7 +656,11 @@ namespace PicoShot.Localization
             }
             //*
 
-            if (IsRightToLeft)
+            if (LocalizationConfigProvider.Config.SupportMixedText)
+            {
+                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
+            }
+            else if (IsRightToLeft)
             {
                 text = RtlTextHandler.Fix(text);
             }
@@ -758,7 +770,14 @@ namespace PicoShot.Localization
             if (array == null)
                 return null;
 
-            if (IsRightToLeft)
+            if (LocalizationConfigProvider.Config.SupportMixedText)
+            {
+                for (int i = 0; i < array.Length; i++)
+                {
+                    array[i] = RtlTextHandler.FixMixed(array[i], IsRightToLeft);
+                }
+            }
+            else if (IsRightToLeft)
             {
                 for (int i = 0; i < array.Length; i++)
                 {

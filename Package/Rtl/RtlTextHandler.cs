@@ -55,6 +55,151 @@ namespace PicoShot.Localization.Rtl
             FixerTool.CombineTashkeel = combineTashkeel;
             return Fix(str, showTashkeel, useHinduNumbers);
         }
+
+        public static string FixMixed(string str, bool isMainRtl)
+        {
+            if (string.IsNullOrEmpty(str)) return str;
+
+            var rawTokens = new List<TextToken>();
+            CharDirection currentDir = CharDirection.Neutral;
+            TextToken currentToken = null;
+
+            for (int i = 0; i < str.Length; i++)
+            {
+                char c = str[i];
+                CharDirection dir = GetCharDirection(c);
+
+                if (currentToken == null)
+                {
+                    currentDir = dir;
+                    currentToken = new TextToken { Direction = dir };
+                    currentToken.Text.Append(c);
+                    rawTokens.Add(currentToken);
+                }
+                else if (dir == currentDir || (dir == CharDirection.Neutral && currentDir == CharDirection.Neutral))
+                {
+                    currentToken.Text.Append(c);
+                }
+                else if (dir == CharDirection.Neutral)
+                {
+                    currentDir = dir;
+                    currentToken = new TextToken { Direction = dir };
+                    currentToken.Text.Append(c);
+                    rawTokens.Add(currentToken);
+                }
+                else
+                {
+                    currentDir = dir;
+                    currentToken = new TextToken { Direction = dir };
+                    currentToken.Text.Append(c);
+                    rawTokens.Add(currentToken);
+                }
+            }
+
+            CharDirection mainDir = isMainRtl ? CharDirection.RTL : CharDirection.LTR;
+            for (int i = 0; i < rawTokens.Count; i++)
+            {
+                if (rawTokens[i].Direction == CharDirection.Neutral)
+                {
+                    CharDirection prevDir = (i > 0) ? rawTokens[i - 1].Direction : CharDirection.Neutral;
+                    CharDirection nextDir = (i < rawTokens.Count - 1) ? rawTokens[i + 1].Direction : CharDirection.Neutral;
+
+                    if (prevDir == nextDir && prevDir != CharDirection.Neutral)
+                        rawTokens[i].Direction = prevDir;
+                    else
+                        rawTokens[i].Direction = mainDir;
+                }
+            }
+
+            var mergedTokens = new List<TextToken>();
+            if (rawTokens.Count > 0)
+            {
+                var currentMerged = new TextToken { Direction = rawTokens[0].Direction };
+                currentMerged.Text.Append(rawTokens[0].Text);
+                mergedTokens.Add(currentMerged);
+
+                for (int i = 1; i < rawTokens.Count; i++)
+                {
+                    if (rawTokens[i].Direction == currentMerged.Direction)
+                    {
+                        currentMerged.Text.Append(rawTokens[i].Text);
+                    }
+                    else
+                    {
+                        currentMerged = new TextToken { Direction = rawTokens[i].Direction };
+                        currentMerged.Text.Append(rawTokens[i].Text);
+                        mergedTokens.Add(currentMerged);
+                    }
+                }
+            }
+
+            var sb = new StringBuilder(str.Length);
+            if (isMainRtl)
+            {
+                for (int i = mergedTokens.Count - 1; i >= 0; i--)
+                {
+                    sb.Append(ProcessToken(mergedTokens[i]));
+                }
+            }
+            else
+            {
+                for (int i = 0; i < mergedTokens.Count; i++)
+                {
+                    sb.Append(ProcessToken(mergedTokens[i]));
+                }
+            }
+
+            return sb.ToString();
+        }
+
+        private static string ProcessToken(TextToken token)
+        {
+            if (token.Direction == CharDirection.RTL)
+                return Fix(token.Text.ToString());
+
+            // Convert numbers in LTR tokens if needed, without reversing
+            var text = token.Text.ToString();
+            var sb = new StringBuilder(text.Length);
+            for (int i = 0; i < text.Length; i++)
+            {
+                char c = text[i];
+                if (char.IsDigit(c) && c >= '0' && c <= '9')
+                    sb.Append((char)FixerTool.HandleInduNumber(c, c));
+                else
+                    sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private enum CharDirection
+        {
+            LTR,
+            RTL,
+            Neutral
+        }
+
+        private class TextToken
+        {
+            public CharDirection Direction;
+            public StringBuilder Text = new StringBuilder();
+        }
+
+        private static CharDirection GetCharDirection(char c)
+        {
+            if (c >= 0x0590 && c <= 0x08FF || 
+                c >= 0xFB1D && c <= 0xFDFF || 
+                c >= 0xFE70 && c <= 0xFEFF)
+                return CharDirection.RTL;
+
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+                (c >= 0x00C0 && c <= 0x00FF) || (c >= 0x0400 && c <= 0x04FF))
+                return CharDirection.LTR;
+
+            if (char.IsNumber(c))
+                return CharDirection.LTR;
+
+            return CharDirection.Neutral;
+        }
     }
 
 
@@ -575,7 +720,7 @@ namespace PicoShot.Localization.Rtl
             }
         }
 
-        private static ushort HandleInduNumber(ushort letterOrigin, ushort letterFinal)
+        internal static ushort HandleInduNumber(ushort letterOrigin, ushort letterFinal)
         {
             return letterOrigin switch
             {
