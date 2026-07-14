@@ -821,3 +821,17 @@ When enabled, the `RtlTextHandler` uses a smart token-based algorithm to:
 - Logical Input: `قیمت 500 تومان`
 - Rendered Output: `ناموت 500 تمیق`
 *(The Persian words are reshaped and placed in correct RTL flow, while the English numbers remain LTR)*
+
+### Generating TextMeshPro Fonts for Arabic/Persian
+
+To display Arabic and Persian texts correctly in TextMeshPro, you need to generate a Font Asset that includes all the necessary characters (Base letters, Presentation Forms, and Diacritics).
+
+We have provided a ready-to-use Unicode range file(s) at `Package/Assets`.
+
+**How to generate the font:**
+
+1. Open **Window > TextMeshPro > Font Asset Creator**.
+2. Select your source TTF/OTF font (make sure it supports Arabic/Persian).
+3. In the **Character Set** dropdown, choose **Custom Range**.
+4. Open ranges file, copy its content, and paste it into the **Character Sequence (Hex)** box.
+5. Generate the font atlas and save it.
