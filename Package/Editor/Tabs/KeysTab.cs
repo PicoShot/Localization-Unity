@@ -20,6 +20,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private string _newKey = "";
         private string _newValue = "";
         private bool _pendingDelete;
+        private bool _isTranslating;
         private float _keysListViewportHeight;
 
         private static Texture2D _transparentTexture;
@@ -478,8 +479,10 @@ namespace PicoShot.Localization.Editor.Tabs
             if (GUILayout.Button("Rename", GUILayout.Width(65)))
                 RenameKey();
 
-            if (GUILayout.Button("Translate", GUILayout.Width(65)))
-                _ = _translationService.TranslateAndFill(Data.SelectedKey);
+            EditorGUI.BeginDisabledGroup(_isTranslating);
+            if (GUILayout.Button(_isTranslating ? "Translating..." : "Translate", GUILayout.Width(85)))
+                ExecuteTranslation();
+            EditorGUI.EndDisabledGroup();
 
             if (GUILayout.Button("Copy", GUILayout.Width(55)))
                 ShowCopyKeyMenu();
@@ -544,6 +547,30 @@ namespace PicoShot.Localization.Editor.Tabs
             });
 
             menu.ShowAsContext();
+        }
+
+        private async void ExecuteTranslation()
+        {
+            if (_isTranslating || string.IsNullOrEmpty(Data.SelectedKey)) return;
+
+            _isTranslating = true;
+            Editor.Repaint();
+
+            try
+            {
+                await _translationService.TranslateAndFill(Data.SelectedKey);
+                Editor.ShowNotification(new GUIContent("Translation completed successfully!"));
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Translation failed: {ex.Message}");
+                Editor.ShowNotification(new GUIContent("Translation failed!"));
+            }
+            finally
+            {
+                _isTranslating = false;
+                Editor.Repaint();
+            }
         }
 
         private void AddKey(bool isArray)
@@ -707,7 +734,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 case KeyCode.T:
                     if (ctrlPressed)
                     {
-                        _ = _translationService.TranslateAndFill(Data.SelectedKey);
+                        ExecuteTranslation();
                         evt.Use();
                         return true;
                     }
