@@ -213,9 +213,15 @@ namespace PicoShot.Localization
 #endif
                 }
 
+#if UNITY_EDITOR
+                string targetLanguage = !string.IsNullOrEmpty(_currentLanguageCode) && _availableLanguages.Contains(_currentLanguageCode)
+                    ? _currentLanguageCode
+                    : (!Application.isPlaying && _availableLanguages.Contains(DefaultLanguage) ? DefaultLanguage : DetectSystemLanguage());
+#else
                 string targetLanguage = !string.IsNullOrEmpty(_currentLanguageCode) && _availableLanguages.Contains(_currentLanguageCode)
                     ? _currentLanguageCode
                     : DetectSystemLanguage();
+#endif
 
                 SetLanguage(targetLanguage, useFallback: false);
 
