@@ -10,10 +10,15 @@ namespace PicoShot.Localization.Rtl
 
         public static string Fix(string str)
         {
-            return Fix(str, false, true);
+            return FixInternal(str, false, true, false);
         }
 
-        private static string Fix(string str, bool showTashkeel, bool useHinduNumbers)
+        internal static string Fix(string str, bool preserveOrder)
+        {
+            return FixInternal(str, false, true, preserveOrder);
+        }
+
+        private static string FixInternal(string str, bool showTashkeel, bool useHinduNumbers, bool preserveOrder)
         {
             FixerTool.ShowTashkeel = showTashkeel;
             FixerTool.UseHinduNumbers = useHinduNumbers;
@@ -25,7 +30,7 @@ namespace PicoShot.Localization.Rtl
 
             if (!str.Contains(Environment.NewLine))
             {
-                return FixerTool.FixLine(str);
+                return FixerTool.FixLine(str, preserveOrder);
             }
 
             var stringSeparators = new[] { Environment.NewLine };
@@ -33,18 +38,18 @@ namespace PicoShot.Localization.Rtl
 
             if (strSplit.Length <= 1)
             {
-                return FixerTool.FixLine(str);
+                return FixerTool.FixLine(str, preserveOrder);
             }
 
             StringBuilder.Clear();
             StringBuilder.EnsureCapacity(str.Length);
 
-            StringBuilder.Append(FixerTool.FixLine(strSplit[0]));
+            StringBuilder.Append(FixerTool.FixLine(strSplit[0], preserveOrder));
 
             for (int i = 1; i < strSplit.Length; i++)
             {
                 StringBuilder.Append(Environment.NewLine);
-                StringBuilder.Append(FixerTool.FixLine(strSplit[i]));
+                StringBuilder.Append(FixerTool.FixLine(strSplit[i], preserveOrder));
             }
 
             return StringBuilder.ToString();
@@ -53,10 +58,15 @@ namespace PicoShot.Localization.Rtl
         public static string Fix(string str, bool showTashkeel, bool combineTashkeel, bool useHinduNumbers)
         {
             FixerTool.CombineTashkeel = combineTashkeel;
-            return Fix(str, showTashkeel, useHinduNumbers);
+            return FixInternal(str, showTashkeel, useHinduNumbers, false);
         }
 
         public static string FixMixed(string str, bool isMainRtl)
+        {
+            return FixMixed(str, isMainRtl, false);
+        }
+
+        internal static string FixMixed(string str, bool isMainRtl, bool preserveOrder)
         {
             if (string.IsNullOrEmpty(str)) return str;
 
@@ -134,28 +144,28 @@ namespace PicoShot.Localization.Rtl
             }
 
             var sb = new StringBuilder(str.Length);
-            if (isMainRtl)
+            if (isMainRtl && !preserveOrder)
             {
                 for (int i = mergedTokens.Count - 1; i >= 0; i--)
                 {
-                    sb.Append(ProcessToken(mergedTokens[i]));
+                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder));
                 }
             }
             else
             {
                 for (int i = 0; i < mergedTokens.Count; i++)
                 {
-                    sb.Append(ProcessToken(mergedTokens[i]));
+                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder));
                 }
             }
 
             return sb.ToString();
         }
 
-        private static string ProcessToken(TextToken token)
+        private static string ProcessToken(TextToken token, bool preserveOrder)
         {
             if (token.Direction == CharDirection.RTL)
-                return Fix(token.Text.ToString());
+                return Fix(token.Text.ToString(), preserveOrder);
 
             // Convert numbers in LTR tokens if needed, without reversing
             var text = token.Text.ToString();
@@ -570,7 +580,7 @@ namespace PicoShot.Localization.Rtl
             }
         }
 
-        internal static string FixLine(string str)
+        internal static string FixLine(string str, bool preserveOrder = false)
         {
             if (string.IsNullOrEmpty(str))
             {
@@ -646,6 +656,16 @@ namespace PicoShot.Localization.Rtl
             InternalStringBuilder.EnsureCapacity(lettersFinal.Length);
 
             var numberList = new List<char>(16);
+
+            if (preserveOrder)
+            {
+                for (var i = 0; i < lettersFinal.Length; i++)
+                {
+                    if (lettersFinal[i] != 0xFFFF)
+                        InternalStringBuilder.Append(lettersFinal[i]);
+                }
+                return InternalStringBuilder.ToString();
+            }
 
             for (var i = lettersFinal.Length - 1; i >= 0; i--)
             {

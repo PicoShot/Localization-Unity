@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using PicoShot.Localization.Config;
 
 namespace PicoShot.Localization
 {
@@ -14,7 +15,7 @@ namespace PicoShot.Localization
     /// </summary>
     [AddComponentMenu("UI/Localized Text")]
     [DisallowMultipleComponent]
-    public class LocalizationTextComponent : MonoBehaviour
+    public class LocalizationTextComponent : UnityEngine.EventSystems.UIBehaviour
     {
         #region Inspector Fields
 
@@ -362,8 +363,28 @@ namespace PicoShot.Localization
 
             if (_lastText == text) return;
 
+            if (_tmpText != null && LocalizationManager.IsRightToLeft)
+            {
+                // Disable TMP's broken RTL handling
+                _tmpText.isRightToLeftText = false;
+                
+                // Get the logical text for accurate line breaking
+                string logicalText = LocalizationManager.GetLogicalText(translationKey);
+                logicalText = ApplyProcessors(logicalText);
+                
+                if (_originalLogicalText != logicalText)
+                {
+                    _originalLogicalText = logicalText;
+                }
+                
+                FixTMPRtlWrap();
+                // Return here because FixTMPRtlWrap will trigger onTextUpdated and update _lastText
+                return;
+            }
+            
             if (_tmpText != null)
             {
+                _tmpText.isRightToLeftText = false;
                 _tmpText.text = text;
             }
             else if (_legacyText != null)
@@ -377,6 +398,95 @@ namespace PicoShot.Localization
 
             _lastText = text;
             onTextUpdated?.Invoke(text);
+        }
+
+        private string _originalLogicalText;
+        private bool _isFixingTMP;
+
+        private void FixTMPRtlWrap()
+        {
+            if (_tmpText == null || string.IsNullOrEmpty(_originalLogicalText) || !LocalizationManager.IsRightToLeft) return;
+            if (_isFixingTMP) return;
+
+            _isFixingTMP = true;
+
+            // 1. Give TMP the logical (reshaped but NOT reversed) text
+            _tmpText.text = _originalLogicalText;
+
+            // 2. Force mesh update so TMP calculates logical line breaks
+            _tmpText.ForceMeshUpdate(ignoreActiveState: true, forceTextReparsing: true);
+
+            var textInfo = _tmpText.textInfo;
+            if (textInfo != null && textInfo.lineCount > 1)
+            {
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < textInfo.lineCount; i++)
+                {
+                    int start = textInfo.characterInfo[textInfo.lineInfo[i].firstCharacterIndex].index;
+                    int end = (i < textInfo.lineCount - 1)
+                        ? textInfo.characterInfo[textInfo.lineInfo[i + 1].firstCharacterIndex].index
+                        : _originalLogicalText.Length;
+
+                    int length = end - start;
+                    if (length > 0)
+                    {
+                        string lineLogical = _originalLogicalText.Substring(start, length);
+
+                        // Strip trailing newlines to prevent double newlines
+                        if (lineLogical.EndsWith("\n"))
+                        {
+                            lineLogical = lineLogical.Substring(0, lineLogical.Length - 1);
+                            if (lineLogical.EndsWith("\r"))
+                                lineLogical = lineLogical.Substring(0, lineLogical.Length - 1);
+                        }
+
+                        // Reverse the line visually!
+                        if (LocalizationConfigProvider.Config != null && LocalizationConfigProvider.Config.SupportMixedText)
+                        {
+                            sb.Append(PicoShot.Localization.Rtl.RtlTextHandler.FixMixed(lineLogical, LocalizationManager.IsRightToLeft));
+                        }
+                        else
+                        {
+                            sb.Append(PicoShot.Localization.Rtl.RtlTextHandler.Fix(lineLogical));
+                        }
+
+                        if (i < textInfo.lineCount - 1)
+                        {
+                            sb.Append('\n');
+                        }
+                    }
+                }
+                _tmpText.text = sb.ToString();
+            }
+            else
+            {
+                // Single line, just reverse the whole string
+                if (LocalizationConfigProvider.Config != null && LocalizationConfigProvider.Config.SupportMixedText)
+                {
+                    _tmpText.text = PicoShot.Localization.Rtl.RtlTextHandler.FixMixed(_originalLogicalText, LocalizationManager.IsRightToLeft);
+                }
+                else
+                {
+                    _tmpText.text = PicoShot.Localization.Rtl.RtlTextHandler.Fix(_originalLogicalText);
+                }
+            }
+
+            _isFixingTMP = false;
+            
+            if (_lastText != _tmpText.text)
+            {
+                _lastText = _tmpText.text;
+                onTextUpdated?.Invoke(_lastText);
+            }
+        }
+
+        protected override void OnRectTransformDimensionsChange()
+        {
+            base.OnRectTransformDimensionsChange();
+            if (_tmpText != null && LocalizationManager.IsRightToLeft)
+            {
+                FixTMPRtlWrap();
+            }
         }
 
         private void UpdateDropdown()
