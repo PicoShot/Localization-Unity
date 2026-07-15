@@ -614,6 +614,25 @@ namespace PicoShot.Localization
             return text;
         }
 
+        internal static string GetLogicalArrayText(string key, int index)
+        {
+            if (string.IsNullOrEmpty(key)) return string.Empty;
+            if (!_isInitialized) Initialize();
+
+            string[] array = GetArrayInternal(Key.FromKey(key));
+            if (array == null || array.Length == 0)
+            {
+                Debug.LogWarning($"[LocalizationManager] Key '{key}' is not an array or is empty");
+                return $"[{key}]";
+            }
+
+            if (index >= 0 && index < array.Length)
+                return array[index] ?? string.Empty;
+
+            Debug.LogWarning($"[LocalizationManager] Array index {index} out of range for key '{key}'");
+            return $"[{key}:{index}]";
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static string GetText(long keyHash, params object[] args)
         {

@@ -7,6 +7,7 @@ using UnityEngine.Events;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using PicoShot.Localization.Config;
+using PicoShot.Localization.Rtl;
 
 namespace PicoShot.Localization
 {
@@ -138,6 +139,9 @@ namespace PicoShot.Localization
         private TextMesh _textMesh;
 
         private string _lastText;
+        private string _originalLogicalText;
+        private bool _isFixingTMP;
+        private Vector2 _lastWrappedRectSize = new(float.NaN, float.NaN);
         private bool _isInitialized;
         private readonly List<Func<string, string>> _textProcessors = new();
 
@@ -285,6 +289,9 @@ namespace PicoShot.Localization
                 }
                 if (_textMesh != null) _textMesh.font = legacyFont;
             }
+
+            if (_tmpText != null && LocalizationManager.IsRightToLeft && _originalLogicalText != null)
+                ApplyTMPRtlWrap(_originalLogicalText, force: true);
         }
 
         /// <summary>
@@ -364,30 +371,18 @@ namespace PicoShot.Localization
 
         private void UpdateTextComponent()
         {
+            if (_tmpText != null && LocalizationManager.IsRightToLeft)
+            {
+                string logicalText = ApplyProcessors(GetLogicalTranslatedText());
+                ApplyTMPRtlWrap(logicalText, force: true);
+                return;
+            }
+
             string text = GetTranslatedText();
             text = ApplyProcessors(text);
 
             if (_lastText == text) return;
 
-            if (_tmpText != null && LocalizationManager.IsRightToLeft)
-            {
-                // Disable TMP's broken RTL handling
-                _tmpText.isRightToLeftText = false;
-                
-                // Get the logical text for accurate line breaking
-                string logicalText = LocalizationManager.GetLogicalText(translationKey);
-                logicalText = ApplyProcessors(logicalText);
-                
-                if (_originalLogicalText != logicalText)
-                {
-                    _originalLogicalText = logicalText;
-                }
-                
-                FixTMPRtlWrap();
-                // Return here because FixTMPRtlWrap will trigger onTextUpdated and update _lastText
-                return;
-            }
-            
             if (_tmpText != null)
             {
                 _tmpText.isRightToLeftText = false;
@@ -406,92 +401,142 @@ namespace PicoShot.Localization
             onTextUpdated?.Invoke(text);
         }
 
-        private string _originalLogicalText;
-        private bool _isFixingTMP;
-
-        private void FixTMPRtlWrap()
+        private void ApplyTMPRtlWrap(string logicalText, bool force)
         {
-            if (_tmpText == null || string.IsNullOrEmpty(_originalLogicalText) || !LocalizationManager.IsRightToLeft) return;
-            if (_isFixingTMP) return;
+            if (_tmpText == null || !LocalizationManager.IsRightToLeft || _isFixingTMP) return;
+
+            RectTransform rectTransform = _tmpText.rectTransform;
+            Vector2 rectSize = rectTransform != null
+                ? rectTransform.rect.size
+                : new Vector2(float.PositiveInfinity, float.PositiveInfinity);
+            if (!force && logicalText == _originalLogicalText)
+            {
+                bool widthUnchanged = Mathf.Approximately(rectSize.x, _lastWrappedRectSize.x);
+                bool relevantHeightUnchanged = !_tmpText.enableAutoSizing ||
+                                               Mathf.Approximately(rectSize.y, _lastWrappedRectSize.y);
+                if (widthUnchanged && relevantHeightUnchanged) return;
+            }
+
+            _originalLogicalText = logicalText ?? string.Empty;
+            _lastWrappedRectSize = rectSize;
+            _tmpText.isRightToLeftText = false;
+
+            if (_originalLogicalText.Length == 0)
+            {
+                SetTMPTextAndNotify(string.Empty);
+                return;
+            }
 
             _isFixingTMP = true;
-
-            // 1. Give TMP the logical (reshaped but NOT reversed) text
-            _tmpText.text = _originalLogicalText;
-
-            // 2. Force mesh update so TMP calculates logical line breaks
-            _tmpText.ForceMeshUpdate(ignoreActiveState: true, forceTextReparsing: true);
-
-            var textInfo = _tmpText.textInfo;
-            if (textInfo != null && textInfo.lineCount > 1)
+            string finalText = null;
+            try
             {
-                var sb = new System.Text.StringBuilder();
-                for (int i = 0; i < textInfo.lineCount; i++)
+                bool supportMixedText = LocalizationConfigProvider.Config != null &&
+                                        LocalizationConfigProvider.Config.SupportMixedText;
+                string shapedLogicalText = RtlTextMeshProHandler.ShapeForMeasurement(
+                    _originalLogicalText,
+                    supportMixedText,
+                    isMainRtl: true,
+                    _tmpText.richText);
+
+                // TMP measures the same shaped glyphs used by the final visual text,
+                // but in logical order so its line sequence remains top-to-bottom.
+                _tmpText.text = shapedLogicalText;
+                _tmpText.ForceMeshUpdate(ignoreActiveState: true, forceTextReparsing: true);
+
+                TMP_TextInfo textInfo = _tmpText.textInfo;
+                int lineCount = textInfo?.lineCount ?? 0;
+                if (lineCount <= 0)
                 {
-                    int start = textInfo.characterInfo[textInfo.lineInfo[i].firstCharacterIndex].index;
-                    int end = (i < textInfo.lineCount - 1)
-                        ? textInfo.characterInfo[textInfo.lineInfo[i + 1].firstCharacterIndex].index
-                        : _originalLogicalText.Length;
-
-                    int length = end - start;
-                    if (length > 0)
-                    {
-                        string lineLogical = _originalLogicalText.Substring(start, length);
-
-                        // Strip trailing newlines to prevent double newlines
-                        if (lineLogical.EndsWith("\n"))
-                        {
-                            lineLogical = lineLogical.Substring(0, lineLogical.Length - 1);
-                            if (lineLogical.EndsWith("\r"))
-                                lineLogical = lineLogical.Substring(0, lineLogical.Length - 1);
-                        }
-
-                        // Reverse the line visually!
-                        if (LocalizationConfigProvider.Config != null && LocalizationConfigProvider.Config.SupportMixedText)
-                        {
-                            sb.Append(PicoShot.Localization.Rtl.RtlTextHandler.FixMixed(lineLogical, LocalizationManager.IsRightToLeft));
-                        }
-                        else
-                        {
-                            sb.Append(PicoShot.Localization.Rtl.RtlTextHandler.Fix(lineLogical));
-                        }
-
-                        if (i < textInfo.lineCount - 1)
-                        {
-                            sb.Append('\n');
-                        }
-                    }
-                }
-                _tmpText.text = sb.ToString();
-            }
-            else
-            {
-                // Single line, just reverse the whole string
-                if (LocalizationConfigProvider.Config != null && LocalizationConfigProvider.Config.SupportMixedText)
-                {
-                    _tmpText.text = PicoShot.Localization.Rtl.RtlTextHandler.FixMixed(_originalLogicalText, LocalizationManager.IsRightToLeft);
+                    finalText = string.Empty;
                 }
                 else
                 {
-                    _tmpText.text = PicoShot.Localization.Rtl.RtlTextHandler.Fix(_originalLogicalText);
+                    var output = new System.Text.StringBuilder(shapedLogicalText.Length + lineCount);
+                    var markupState = new RtlTextMeshProHandler.MarkupState();
+                    int sourceStart = 0;
+
+                    for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+                    {
+                        int sourceEnd = shapedLogicalText.Length;
+                        if (lineIndex < lineCount - 1)
+                        {
+                            int nextCharacterIndex = textInfo.lineInfo[lineIndex + 1].firstCharacterIndex;
+                            if (nextCharacterIndex >= 0 && nextCharacterIndex < textInfo.characterCount)
+                                sourceEnd = textInfo.characterInfo[nextCharacterIndex].index;
+                        }
+
+                        sourceEnd = Mathf.Clamp(sourceEnd, sourceStart, shapedLogicalText.Length);
+                        string shapedLine = shapedLogicalText.Substring(sourceStart, sourceEnd - sourceStart);
+                        output.Append(RtlTextMeshProHandler.ReverseMeasuredLine(
+                            shapedLine,
+                            supportMixedText,
+                            isMainRtl: true,
+                            _tmpText.richText,
+                            markupState));
+
+                        if (lineIndex < lineCount - 1) output.Append('\n');
+                        sourceStart = sourceEnd;
+                    }
+
+                    finalText = output.ToString();
                 }
             }
-
-            _isFixingTMP = false;
-            
-            if (_lastText != _tmpText.text)
+            catch (Exception ex)
             {
-                _lastText = _tmpText.text;
-                onTextUpdated?.Invoke(_lastText);
+                Debug.LogError($"[LocalizationTextComponent] RTL wrapping failed on {gameObject.name}: {ex.Message}", this);
+                try
+                {
+                    finalText = GetSafeRtlFallback(_originalLogicalText);
+                }
+                catch (Exception fallbackException)
+                {
+                    Debug.LogError(
+                        $"[LocalizationTextComponent] RTL fallback failed on {gameObject.name}: {fallbackException.Message}",
+                        this);
+                    finalText = _originalLogicalText;
+                }
             }
+            finally
+            {
+                _isFixingTMP = false;
+            }
+
+            SetTMPTextAndNotify(finalText ?? string.Empty);
+        }
+
+        private string GetSafeRtlFallback(string logicalText)
+        {
+            bool supportMixedText = LocalizationConfigProvider.Config != null &&
+                                    LocalizationConfigProvider.Config.SupportMixedText;
+            string shaped = RtlTextMeshProHandler.ShapeForMeasurement(
+                logicalText,
+                supportMixedText,
+                isMainRtl: true,
+                _tmpText.richText);
+            return RtlTextMeshProHandler.ReverseMeasuredLine(
+                shaped,
+                supportMixedText,
+                isMainRtl: true,
+                _tmpText.richText,
+                new RtlTextMeshProHandler.MarkupState());
+        }
+
+        private void SetTMPTextAndNotify(string text)
+        {
+            _tmpText.text = text;
+            if (_lastText == text) return;
+
+            _lastText = text;
+            onTextUpdated?.Invoke(text);
         }
 
         protected override void OnRectTransformDimensionsChange()
         {
             base.OnRectTransformDimensionsChange();
-            if (_tmpText != null && LocalizationManager.IsRightToLeft)
+            if (_tmpText != null && LocalizationManager.IsRightToLeft && _originalLogicalText != null)
             {
-                FixTMPRtlWrap();
+                ApplyTMPRtlWrap(_originalLogicalText, force: false);
             }
         }
 
@@ -579,6 +624,17 @@ namespace PicoShot.Localization
             }
 
             return LocalizationManager.GetText(translationKey);
+        }
+
+        private string GetLogicalTranslatedText()
+        {
+            if (arrayIndex >= 0)
+                return LocalizationManager.GetLogicalArrayText(translationKey, arrayIndex);
+
+            if (formatParameters != null && formatParameters.Length > 0)
+                return LocalizationManager.GetLogicalText(translationKey, formatParameters);
+
+            return LocalizationManager.GetLogicalText(translationKey);
         }
 
         private string ApplyProcessors(string text)

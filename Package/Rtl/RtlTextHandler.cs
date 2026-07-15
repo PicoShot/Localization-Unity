@@ -18,6 +18,28 @@ namespace PicoShot.Localization.Rtl
             return FixInternal(str, false, true, preserveOrder);
         }
 
+        /// <summary>
+        /// Shapes RTL characters without changing their logical order. The resulting
+        /// string can be measured by TextMeshPro and later passed to Reverse or
+        /// ReverseMixed without reshaping it a second time.
+        /// </summary>
+        internal static string Shape(string str, bool supportMixedText, bool isMainRtl)
+        {
+            return supportMixedText
+                ? FixMixed(str, isMainRtl, true)
+                : Fix(str, true);
+        }
+
+        internal static string Reverse(string str)
+        {
+            return ProcessLines(str, FixerTool.ReverseLine);
+        }
+
+        internal static string ReverseMixed(string str, bool isMainRtl)
+        {
+            return FixMixedInternal(str, isMainRtl, false, true);
+        }
+
         private static string FixInternal(string str, bool showTashkeel, bool useHinduNumbers, bool preserveOrder)
         {
             FixerTool.ShowTashkeel = showTashkeel;
@@ -67,6 +89,11 @@ namespace PicoShot.Localization.Rtl
         }
 
         internal static string FixMixed(string str, bool isMainRtl, bool preserveOrder)
+        {
+            return FixMixedInternal(str, isMainRtl, preserveOrder, false);
+        }
+
+        private static string FixMixedInternal(string str, bool isMainRtl, bool preserveOrder, bool alreadyShaped)
         {
             if (string.IsNullOrEmpty(str)) return str;
 
@@ -148,24 +175,26 @@ namespace PicoShot.Localization.Rtl
             {
                 for (int i = mergedTokens.Count - 1; i >= 0; i--)
                 {
-                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder));
+                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder, alreadyShaped));
                 }
             }
             else
             {
                 for (int i = 0; i < mergedTokens.Count; i++)
                 {
-                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder));
+                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder, alreadyShaped));
                 }
             }
 
             return sb.ToString();
         }
 
-        private static string ProcessToken(TextToken token, bool preserveOrder)
+        private static string ProcessToken(TextToken token, bool preserveOrder, bool alreadyShaped)
         {
             if (token.Direction == CharDirection.RTL)
-                return Fix(token.Text.ToString(), preserveOrder);
+                return alreadyShaped
+                    ? Reverse(token.Text.ToString())
+                    : Fix(token.Text.ToString(), preserveOrder);
 
             // Convert numbers in LTR tokens if needed, without reversing
             var text = token.Text.ToString();
@@ -177,6 +206,24 @@ namespace PicoShot.Localization.Rtl
                     sb.Append((char)FixerTool.HandleInduNumber(c, c));
                 else
                     sb.Append(c);
+            }
+            return sb.ToString();
+        }
+
+        private static string ProcessLines(string str, Func<string, string> processor)
+        {
+            if (string.IsNullOrEmpty(str)) return str;
+
+            string normalized = str.Replace("\r\n", "\n").Replace('\r', '\n');
+            if (normalized.IndexOf('\n') < 0)
+                return processor(normalized);
+
+            string[] lines = normalized.Split(new[] { '\n' }, StringSplitOptions.None);
+            var sb = new StringBuilder(normalized.Length);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                if (i > 0) sb.Append('\n');
+                sb.Append(processor(lines[i]));
             }
             return sb.ToString();
         }
@@ -652,13 +699,10 @@ namespace PicoShot.Localization.Rtl
             if (ShowTashkeel && tashkeelLocation.Count > 0)
                 ReturnTashkeel(ref lettersFinal, tashkeelLocation);
 
-            InternalStringBuilder.Clear();
-            InternalStringBuilder.EnsureCapacity(lettersFinal.Length);
-
-            var numberList = new List<char>(16);
-
             if (preserveOrder)
             {
+                InternalStringBuilder.Clear();
+                InternalStringBuilder.EnsureCapacity(lettersFinal.Length);
                 for (var i = 0; i < lettersFinal.Length; i++)
                 {
                     if (lettersFinal[i] != 0xFFFF)
@@ -666,6 +710,22 @@ namespace PicoShot.Localization.Rtl
                 }
                 return InternalStringBuilder.ToString();
             }
+
+            return ReverseLetters(lettersFinal);
+        }
+
+        internal static string ReverseLine(string str)
+        {
+            if (string.IsNullOrEmpty(str)) return str;
+            return ReverseLetters(str.ToCharArray());
+        }
+
+        private static string ReverseLetters(char[] lettersFinal)
+        {
+            InternalStringBuilder.Clear();
+            InternalStringBuilder.EnsureCapacity(lettersFinal.Length);
+
+            var numberList = new List<char>(16);
 
             for (var i = lettersFinal.Length - 1; i >= 0; i--)
             {
