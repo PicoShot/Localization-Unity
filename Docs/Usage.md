@@ -1,5 +1,5 @@
 <div dir="ltr" align=center>
-    
+
  [**Usage**](Usage.md) / [**Keybinds**](Keybinds.md) / [**BLOC Format**](BLOC_FORMAT.md) / [**FAQ**](FAQ.md) / [**How It Works**](HowItWorks.md)
 
 </div>
@@ -357,7 +357,9 @@ LocalizationManager.BindText(textMesh, "title", arrayIndex: 0);
 For more control, you can work with `LocalizationTextComponent` directly.
 
 #### Inspector Integration
+
 The Unity Inspector for `LocalizationTextComponent` provides a smart interface:
+
 - **View & Key Dropdowns:** Instead of manually typing keys, you can select the target view and key from searchable dropdown menus to prevent typos.
 - **Context Menu:** Right-click the component and select `Switch language` to dynamically cycle through available languages and instantly preview the text directly in Edit Mode.
 
@@ -751,9 +753,11 @@ public class GameMessageSystem : MonoBehaviour
 ```
 
 ### Using TextNodes
+
 TextNode is a node-based text system designed for localization and networking.
 
 Instead of storing text as a plain string, messages are built from composable nodes:
+
 - Plain text
 - Localized entries
 - Rich text modifiers
@@ -763,6 +767,7 @@ This allows text to be transferred over the network while preserving localizatio
 When received, the message is automatically rebuilt using the target player's selected language.
 
 > If your project uses Netcode, add `NETCODE` to your Scripting Define Symbols.
+
 ```csharp
 [InitializeOnLoad]
 public static class TestTextNode
@@ -807,17 +812,20 @@ PicoShot Localization natively supports Right-to-Left (RTL) languages like Arabi
 When working with dynamic strings that contain both Arabic/Persian words and English words (or vice versa), you can enable the **Mixed LTR/RTL Support** feature in the `Tools > Localization > Language Editor > Settings` tab.
 
 When enabled, the `RtlTextHandler` uses a smart token-based algorithm to:
+
 1. Parse the string into contiguous LTR, RTL, and Neutral blocks (e.g., punctuation and spaces).
 2. Apply reshaping and reversal **only** to the Arabic/Persian blocks.
 3. Automatically resolve the alignment of punctuation marks depending on their surrounding text.
 4. Render the entire string in the correct visual order based on the main language context (left-to-right for English, right-to-left for Arabic/Persian).
 
 **Example in LTR Context (English):**
+
 - Logical Input: `Hello (مرحبا) World`
 - Rendered Output: `Hello (ابحرم) World`
 *(The Arabic word is properly reshaped and connected inside the parentheses without breaking the English sentence structure)*
 
 **Example in RTL Context (Persian):**
+
 - Logical Input: `قیمت 500 تومان`
 - Rendered Output: `ناموت 500 تمیق`
 *(The Persian words are reshaped and placed in correct RTL flow, while the English numbers remain LTR)*
@@ -826,7 +834,7 @@ When enabled, the `RtlTextHandler` uses a smart token-based algorithm to:
 
 To display Arabic and Persian texts correctly in TextMeshPro, you need to generate a Font Asset that includes all the necessary characters (Base letters, Presentation Forms, and Diacritics).
 
-We have provided a ready-to-use Unicode range file(s) at `Package/Assets`.
+We have provided a ready-to-use Unicode range file(s) at `@/Assets`.
 
 **How to generate the font:**
 
