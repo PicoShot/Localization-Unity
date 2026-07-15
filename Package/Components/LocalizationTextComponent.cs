@@ -5,6 +5,7 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using UnityEngine.EventSystems;
 using PicoShot.Localization.Config;
 
 namespace PicoShot.Localization
@@ -15,7 +16,7 @@ namespace PicoShot.Localization
     /// </summary>
     [AddComponentMenu("UI/Localized Text")]
     [DisallowMultipleComponent]
-    public class LocalizationTextComponent : UnityEngine.EventSystems.UIBehaviour
+    public class LocalizationTextComponent : UIBehaviour
     {
         #region Inspector Fields
 
@@ -144,13 +145,15 @@ namespace PicoShot.Localization
 
         #region Unity Lifecycle
 
-        private void Awake()
+        protected override void Awake()
         {
+            base.Awake();
             Initialize();
         }
 
-        private void OnEnable()
+        protected override void OnEnable()
         {
+            base.OnEnable();
             LocalizationManager.OnLanguageChanged += UpdateText;
             LocalizationManager.OnFontChanged += UpdateFont;
             if (_isInitialized && Application.isPlaying)
@@ -163,22 +166,25 @@ namespace PicoShot.Localization
             UpdateFont(tmpFont, legacyFont);
         }
 
-        private void OnDisable()
+        protected override void OnDisable()
         {
+            base.OnDisable();
             LocalizationManager.OnLanguageChanged -= UpdateText;
             LocalizationManager.OnFontChanged -= UpdateFont;
         }
 
-        private void OnDestroy()
+        protected override void OnDestroy()
         {
+            base.OnDestroy();
             LocalizationManager.OnLanguageChanged -= UpdateText;
             LocalizationManager.OnFontChanged -= UpdateFont;
             _textProcessors.Clear();
         }
 
 #if UNITY_EDITOR
-        private void OnValidate()
+        protected override void OnValidate()
         {
+            base.OnValidate();
             if (!Application.isPlaying) return;
             if (!_isInitialized) return;
             UnityEditor.EditorApplication.delayCall += () =>
