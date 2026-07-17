@@ -8,6 +8,7 @@ using UnityEngine;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
 using PicoShot.Localization.Editor.Data;
+using PicoShot.Localization.Editor.Services;
 using PicoShot.Localization.Editor.Tabs;
 using PicoShot.Localization.Bloc;
 
@@ -512,6 +513,11 @@ namespace PicoShot.Localization
                 {
                     LocalizationManager.Dispose();
                     LocalizationManager.Initialize();
+                }
+
+                if (config.GenerateTypedKeys)
+                {
+                    TypedKeyGenerator.Generate(_data);
                 }
             }
             catch (Exception ex)

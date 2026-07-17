@@ -85,6 +85,7 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             DrawDefaultLanguageSection(config);
             DrawKeyViewSettings();
+            DrawTypedKeySettings(config);
             DrawTextProcessingSettings(config);
             DrawCompressionSettings(config);
             DrawProtectionSettings(config);
@@ -139,6 +140,46 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.HelpBox("Views group keys by the first delimiter. This changes editor grouping only; existing key names are not renamed.", MessageType.None);
+            EditorGUILayout.Space();
+        }
+
+        private void DrawTypedKeySettings(LocalizationConfig config)
+        {
+            EditorGUILayout.LabelField("Typed Keys", EditorStyles.boldLabel);
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField(new GUIContent(
+                "Generate Typed Keys:",
+                "Generate hash-backed StringKeys and ArrayKeys enums when localization data is saved."),
+                GUILayout.Width(150));
+            bool enabled = EditorGUILayout.Toggle(config.GenerateTypedKeys);
+            if (enabled != config.GenerateTypedKeys)
+            {
+                config.SetGenerateTypedKeys(enabled);
+                LocalizationConfigProvider.SaveConfig();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (config.GenerateTypedKeys)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Regenerate Typed Keys", GUILayout.Width(180), GUILayout.Height(25)))
+                    TypedKeyGenerator.Generate(Data, showSuccessDialog: true);
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.HelpBox(
+                    $"Generates StringKeys and ArrayKeys in {TypedKeyGenerator.GeneratedCodePath}. " +
+                    "Hashes are calculated at generation time for faster, type-safe runtime lookup.",
+                    MessageType.None);
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    "Generation is disabled. Existing generated files are preserved so dependent code keeps compiling.",
+                    MessageType.None);
+            }
+
             EditorGUILayout.Space();
         }
 

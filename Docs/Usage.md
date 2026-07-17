@@ -172,6 +172,20 @@ string defaultLang = LocalizationManager.DefaultLanguage;
 
 ## Text Retrieval
 
+### Generated Typed Keys
+
+Enable **Generate Typed Keys** under `Tools > Localization > Language Editor > Settings > General` and save the language data. The editor generates separate enums for scalar and array translations.
+
+```csharp
+using PicoShot.Localization.Generated;
+
+string title = LocalizationManager.GetText(StringKeys.MenuTitle);
+string[] difficulties = LocalizationManager.GetArray(ArrayKeys.DifficultyOptions);
+string hard = LocalizationManager.GetArrayText(ArrayKeys.DifficultyOptions, 2);
+```
+
+Enum values contain the precomputed localization hashes, so these overloads avoid runtime string hashing. The source is placed beside `LocalizationConfig.asset` under `Assets/Resources/Localization`, reusing the package's existing configuration folder. Use **Regenerate Typed Keys** in settings to refresh it manually. Disabling generation preserves the last generated file so existing code continues to compile.
+
 ### Get Simple Text
 
 ```csharp

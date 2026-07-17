@@ -8,7 +8,8 @@ namespace PicoShot.Localization.Config
     /// </summary>
     public static class LocalizationConfigProvider
     {
-        private const string ConfigPath = "Assets/Resources/Localization/LocalizationConfig.asset";
+        public const string ConfigDirectory = "Assets/Resources/Localization";
+        public const string ConfigAssetPath = ConfigDirectory + "/LocalizationConfig.asset";
         private const string ResourcesPath = "Localization/LocalizationConfig";
 
         private static LocalizationConfig _cachedConfig;
@@ -62,22 +63,22 @@ namespace PicoShot.Localization.Config
         /// </summary>
         private static LocalizationConfig CreateDefaultConfig()
         {
-            string directory = System.IO.Path.GetDirectoryName(ConfigPath);
+            string directory = System.IO.Path.GetDirectoryName(ConfigAssetPath);
             if (!System.IO.Directory.Exists(directory))
             {
                 System.IO.Directory.CreateDirectory(directory);
             }
 
-            if (!System.IO.File.Exists(ConfigPath))
+            if (!System.IO.File.Exists(ConfigAssetPath))
             {
                 var config = ScriptableObject.CreateInstance<LocalizationConfig>();
-                UnityEditor.AssetDatabase.CreateAsset(config, ConfigPath);
+                UnityEditor.AssetDatabase.CreateAsset(config, ConfigAssetPath);
                 UnityEditor.AssetDatabase.SaveAssets();
                 UnityEditor.AssetDatabase.Refresh();
-                Debug.Log($"[LocalizationConfig] Created default config at: {ConfigPath}");
+                Debug.Log($"[LocalizationConfig] Created default config at: {ConfigAssetPath}");
                 return config;
             }
-            return UnityEditor.AssetDatabase.LoadAssetAtPath<LocalizationConfig>(ConfigPath);
+            return UnityEditor.AssetDatabase.LoadAssetAtPath<LocalizationConfig>(ConfigAssetPath);
         }
 
         /// <summary>

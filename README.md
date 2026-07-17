@@ -24,6 +24,7 @@ A lightweight, zero-runtime-dependency, high-performance localization system for
 - **Key Views** - Organize translation keys by dot or legacy underscore delimiters, with dedicated view export/import
 - **Smart Component Inspector** - Searchable dropdown menus for selecting views and keys directly in the Unity Inspector
 - **Inline Key Initialization** - Set default language values immediately when creating new keys in the Editor
+- **Optional Typed Keys** - Generate hash-backed `StringKeys` and `ArrayKeys` enums for faster, compile-time-safe lookups
 
 ## Localization App
 

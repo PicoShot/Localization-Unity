@@ -25,7 +25,7 @@ namespace PicoShot.Localization
 #if UNITY_EDITOR
     [InitializeOnLoad]
 #endif
-    public static class LocalizationManager
+    public static partial class LocalizationManager
     {
         #region Events
 
@@ -820,11 +820,27 @@ namespace PicoShot.Localization
             }
 
             long keyHash = Hash64.CreateIgnoreCase(key);
+            return GetArrayByHash(keyHash, key);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static string[] GetArrayByHash(long keyHash, string keyDisplayName)
+        {
+            if (keyHash == 0)
+            {
+                Debug.LogError("[LocalizationManager] GetArray called with an empty key hash");
+                return null;
+            }
+
+            if (!_isInitialized)
+            {
+                Initialize();
+            }
 
             if (_arrayCache.TryGetValue(keyHash, out var cached))
                 return cached;
 
-            var array = GetArrayInternal(Key.FromHash(keyHash));
+            var array = GetArrayInternal(Key.FromHash(keyHash), keyDisplayName);
 
             if (array == null)
                 return null;
@@ -851,7 +867,7 @@ namespace PicoShot.Localization
         /// <summary>
         /// Gets an array of strings by key.
         /// </summary>
-        public static string[] GetArray(Key key) => GetArray(key.Value);
+        public static string[] GetArray(Key key) => GetArrayByHash(key.Hash, key.Value ?? key.Hash.ToString());
 
         /// <summary>
         /// Gets a single element from an array by key and index.
@@ -878,9 +894,25 @@ namespace PicoShot.Localization
         /// <summary>
         /// Gets a single element from an array by key and index.
         /// </summary>
-        public static string GetArrayText(Key key, int index) => GetArrayText(key.Value, index);
+        public static string GetArrayText(Key key, int index)
+        {
+            var array = GetArray(key);
+            string displayName = key.Value ?? key.Hash.ToString();
 
-        private static string[] GetArrayInternal(Key key)
+            if (array == null || array.Length == 0)
+            {
+                Debug.LogWarning($"[LocalizationManager] Key '{displayName}' is not an array or is empty");
+                return $"[{displayName}]";
+            }
+
+            if (index >= 0 && index < array.Length)
+                return array[index] ?? string.Empty;
+
+            Debug.LogWarning($"[LocalizationManager] Array index {index} out of range for key '{displayName}'");
+            return $"[{displayName}:{index}]";
+        }
+
+        private static string[] GetArrayInternal(Key key, string keyDisplayName = null)
         {
             object value = null;
             bool found = false;
@@ -895,13 +927,13 @@ namespace PicoShot.Localization
                 found = _fallbackLanguageData.TryGetValue(key.Hash, out value);
                 if (found)
                 {
-                    OnMissingTranslation?.Invoke($"Using fallback for array key '{key}' in '{_currentLanguageCode}'");
+                    OnMissingTranslation?.Invoke($"Using fallback for array key '{keyDisplayName ?? key.Hash.ToString()}' in '{_currentLanguageCode}'");
                 }
             }
 
             if (!found)
             {
-                OnMissingTranslation?.Invoke($"Missing array translation for key '{key}' in '{_currentLanguageCode}'");
+                OnMissingTranslation?.Invoke($"Missing array translation for key '{keyDisplayName ?? key.Hash.ToString()}' in '{_currentLanguageCode}'");
                 return null;
             }
 
