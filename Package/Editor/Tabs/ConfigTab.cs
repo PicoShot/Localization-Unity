@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Editor.Data;
+using PicoShot.Localization.Editor.Mcp;
 using PicoShot.Localization.Editor.Services;
 using PicoShot.Localization.Data;
 
@@ -21,10 +22,11 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             General,
             Translation,
-            Data
+            Data,
+            Mcp
         }
 
-        private static readonly string[] SubTabNames = { "General", "Translation", "Data" };
+        private static readonly string[] SubTabNames = { "General", "Translation", "Data", "MCP" };
         private ConfigSubTab _activeSubTab = ConfigSubTab.General;
 
         public ConfigTab(LocalizationEditor editor, LanguageEditorData data) : base(editor, data)
@@ -57,6 +59,9 @@ namespace PicoShot.Localization.Editor.Tabs
                             break;
                         case ConfigSubTab.Data:
                             DrawDataTab(config);
+                            break;
+                        case ConfigSubTab.Mcp:
+                            DrawMcpTab();
                             break;
                     }
                 }
@@ -100,6 +105,88 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             DrawFileOperations();
             DrawPathInfo();
+        }
+
+        private void DrawMcpTab()
+        {
+            EditorGUILayout.LabelField("MCP Server", EditorStyles.boldLabel);
+
+            bool running = LocalizationMcpServer.IsRunning;
+
+            string endpoint = running ? LocalizationMcpServer.Url : LocalizationMcpServer.ConfiguredUrl;
+
+            EditorGUILayout.BeginHorizontal();
+            EditorGUILayout.LabelField("Endpoint:", GUILayout.Width(80));
+            EditorGUILayout.SelectableLabel(endpoint, GUILayout.Height(18));
+            if (GUILayout.Button("Copy", GUILayout.Width(60)))
+            {
+                EditorGUIUtility.systemCopyBuffer = endpoint;
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(5);
+            EditorGUILayout.BeginHorizontal();
+            if (running)
+            {
+                if (GUILayout.Button("Stop Server", GUILayout.Height(25)))
+                {
+                    LocalizationMcpServer.Stop();
+                    Editor.Repaint();
+                }
+                if (GUILayout.Button("Restart Server", GUILayout.Height(25)))
+                {
+                    LocalizationMcpServer.RestartFromMenu();
+                    Editor.Repaint();
+                }
+            }
+            else
+            {
+                if (GUILayout.Button("Start Server", GUILayout.Height(25)))
+                {
+                    LocalizationMcpServer.StartFromMenu();
+                    Editor.Repaint();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.BeginHorizontal();
+            if (GUILayout.Button("Open Status Page", GUILayout.Height(25)))
+            {
+                LocalizationMcpServer.OpenStatusPage();
+            }
+            if (GUILayout.Button("Copy Agent Config", GUILayout.Height(25)))
+            {
+                LocalizationMcpServer.CopyAgentConfig();
+                Editor.Repaint();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(5);
+            EditorGUILayout.LabelField("Server Settings", EditorStyles.boldLabel);
+
+            bool autoStart = LocalizationMcpServer.AutoStart;
+            bool newAutoStart = EditorGUILayout.Toggle("Start automatically", autoStart);
+            if (newAutoStart != autoStart)
+            {
+                LocalizationMcpServer.AutoStart = newAutoStart;
+            }
+
+            int port = LocalizationMcpServer.PortPrefValue;
+            int newPort = EditorGUILayout.IntField("Port", port);
+            newPort = Mathf.Clamp(newPort, 1, 65535);
+            if (newPort != port)
+            {
+                LocalizationMcpServer.PortPrefValue = newPort;
+                Editor.Repaint();
+            }
+            if (LocalizationMcpServer.IsRunning && LocalizationMcpServer.PortPrefValue != LocalizationMcpServer.Port)
+            {
+                DrawHelpBox(
+                    $"Port changed to {LocalizationMcpServer.PortPrefValue}. " +
+                    $"Restart the server to switch from {LocalizationMcpServer.Port} (agents must reconnect).");
+            }
+
+            EditorGUILayout.Space();
         }
 
         private void DrawDefaultLanguageSection(LocalizationConfig config)
@@ -399,13 +486,13 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Model:", GUILayout.Width(70));
 
-            string[] defaultModels = { 
-                "gemini-2.5-flash", 
+            string[] defaultModels = {
+                "gemini-2.5-flash",
                 "gemini-2.5-flash-lite",
                 "gemini-3-flash-preview",
                 "gemini-3.1-flash-lite-preview",
                 "gemini-3.5-flash",
-                "custom" 
+                "custom"
             };
 
             int selectedIndex = System.Array.IndexOf(defaultModels, Data.GeminiModel);

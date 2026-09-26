@@ -14,12 +14,21 @@ The package ships a built-in [Model Context Protocol](https://modelcontextprotoc
 
 ## Quick start
 
-1. Open your Unity project. The server starts automatically (see `Tools > Localization > MCP Server`).
+1. Open your Unity project and enable the server: Language Editor > Settings > MCP > Start Server (it is off by default).
 2. Check it: open `http://127.0.0.1:8123/` in a browser (status page) or `http://127.0.0.1:8123/health`.
 3. Register the endpoint in your agent (examples below).
 4. Ask the agent to e.g. "list untranslated German keys" or "add key `ui.quit` with English text 'Quit'".
 
 If the Language Editor window is open, it auto-reloads files changed via MCP — unless it has unsaved changes, in which case it warns instead of overwriting your work.
+
+## Settings and status (Language Editor > Settings > MCP)
+
+The MCP subtab shows the server status (running/stopped, endpoint URL, tool count)
+and holds every setting in one place:
+
+- Start / Stop / Restart buttons, Open Status Page, Copy Agent Config.
+- Start automatically: opt in to launching the server with the editor (off by default).
+- Port (default `8123`): saved as you type and used on the next start; if the server is running, restart it to switch ports.
 
 ## Menu reference (`Tools > Localization > MCP Server`)
 
@@ -29,7 +38,7 @@ If the Language Editor window is open, it auto-reloads files changed via MCP —
 | Copy Agent Config             | Copies a generic `{"mcpServers": …}` JSON snippet to the clipboard. |
 | Open Status Page              | Opens the `/` status page in a browser.                             |
 
-The port is stored in EditorPrefs (default `8123`). If you change it, restart the server. Auto-start on editor launch is on by default; disable it by turning off the `PicoShot_Localization_McpAutoStart` EditorPref if you prefer manual starts.
+The port is stored in EditorPrefs (default `8123`) and editable in the MCP settings subtab.
 
 ## Client setup
 

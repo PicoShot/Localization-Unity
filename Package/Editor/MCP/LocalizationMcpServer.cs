@@ -27,8 +27,7 @@ namespace PicoShot.Localization.Editor.Mcp
         private const string AutoStartPref = "PicoShot_Localization_McpAutoStart";
         private const long MaxRequestBytes = 32L * 1024L * 1024L;
 
-        private static readonly object StateLock = new object();
-        private static readonly ConcurrentQueue<string> LogQueue = new ConcurrentQueue<string>();
+        private static readonly object StateLock = new();
 
         private static HttpListener _listener;
         private static CancellationTokenSource _cts;
@@ -48,12 +47,14 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public static string Url => "http://127.0.0.1:" + _port + McpPath;
 
+        public static string ConfiguredUrl => "http://127.0.0.1:" + PortPrefValue + McpPath;
+
         static LocalizationMcpServer()
         {
             EditorApplication.update += DrainMainThreadQueue;
             EditorApplication.quitting += Stop;
             AssemblyReloadEvents.beforeAssemblyReload += Stop;
-            if (EditorPrefs.GetBool(AutoStartPref, true))
+            if (EditorPrefs.GetBool(AutoStartPref, false))
                 EditorApplication.delayCall += () => Start(PortPrefValue);
         }
 
@@ -65,7 +66,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public static bool AutoStart
         {
-            get => EditorPrefs.GetBool(AutoStartPref, true);
+            get => EditorPrefs.GetBool(AutoStartPref, false);
             set => EditorPrefs.SetBool(AutoStartPref, value);
         }
 
@@ -168,9 +169,6 @@ namespace PicoShot.Localization.Editor.Mcp
                 CancellationToken token = _cts.Token;
                 Task.Run(() => AcceptLoop(listener, token));
             }
-
-            EnqueueLog("[Localization MCP] Server running at " + Url + ".");
-            Debug.Log("[Localization MCP] Server running at " + Url);
         }
 
         /// <summary>Stops the server. Safe to call from any thread.</summary>
@@ -244,7 +242,7 @@ namespace PicoShot.Localization.Editor.Mcp
                 }
                 catch (Exception ex)
                 {
-                    EnqueueLog("[Localization MCP] Accept error: " + ex.Message);
+                    Debug.Log("[Localization MCP] Accept error: " + ex.Message);
                     break;
                 }
 #pragma warning disable 4014
@@ -403,18 +401,8 @@ namespace PicoShot.Localization.Editor.Mcp
 
         #region Main-thread bridge
 
-        private static void EnqueueLog(string message)
-        {
-            LogQueue.Enqueue(message);
-        }
-
         private static void DrainMainThreadQueue()
         {
-            while (LogQueue.TryDequeue(out string message))
-            {
-                try { Debug.Log(message); }
-                catch (Exception) { }
-            }
             if (_externalChangePending)
             {
                 _externalChangePending = false;
