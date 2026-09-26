@@ -5,7 +5,7 @@
 This folder contains the official documentation for the localization system.  
 If you're integrating, extending, or just trying to understand how things work, start here.
 
-[**Usage**](Usage.md) / [**Keybinds**](Keybinds.md) / [**BLOC Format**](BLOC_FORMAT.md) / [**FAQ**](FAQ.md) / [**How It Works**](HowItWorks.md)
+[**Usage**](Usage.md) / [**Keybinds**](Keybinds.md) / [**BLOC Format**](BLOC_FORMAT.md) / [**FAQ**](FAQ.md) / [**How It Works**](HowItWorks.md) / [**MCP**](MCP.md)
 
 </div>
 
@@ -20,6 +20,7 @@ If you're integrating, extending, or just trying to understand how things work, 
 | [**BLOC Format**](BLOC_FORMAT.md) | Binary file format specification          | Advanced users & contributors     |
 | [**FAQ**](FAQ.md)                 | Frequently asked questions                | Everyone                          |
 | [**How It Works**](HowItWorks.md) | Architecture & implementation details     | Contributors & curious developers |
+| [**MCP**](MCP.md)                 | MCP server instruction                    | Developers using agents           |
 
 ---
 

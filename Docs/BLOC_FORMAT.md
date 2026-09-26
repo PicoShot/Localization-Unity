@@ -1,7 +1,6 @@
 <div dir="ltr" align=center>
 
- [**Usage**](Usage.md) / [**Keybinds**](Keybinds.md) / [**BLOC Format**](BLOC_FORMAT.md) / [**FAQ**](FAQ.md) / [**How It Works**](HowItWorks.md)
-
+[**Usage**](Usage.md) / [**Keybinds**](Keybinds.md) / [**BLOC Format**](BLOC_FORMAT.md) / [**FAQ**](FAQ.md) / [**How It Works**](HowItWorks.md) / [**MCP**](MCP.md)
 </div>
 
 # BLOC (Binary Localization Container) Format
@@ -109,11 +108,11 @@ Contains all translation key-value pairs. Variable size depending on data.
 
 ### Array Entry (8+ bytes)
 
-| Field       | Size      | Description                                |
-| ----------- | --------- | ------------------------------------------ |
-| KeyId       | 4 bytes   | Index into string pool for the key         |
-| ArrayHeader | 4 bytes   | High bit set + count (0x80000000 | count) |
-| ItemIds     | 4*N bytes | Indices for each array element             |
+| Field       | Size      | Description                        |
+| ----------- | --------- | ---------------------------------- |
+| KeyId       | 4 bytes   | Index into string pool for the key |
+| ArrayHeader | 4 bytes   | High bit set + count (0x80000000   | count) |
+| ItemIds     | 4*N bytes | Indices for each array element     |
 
 **Array Header Format:**
 
@@ -296,20 +295,20 @@ Little-endian (standard for Unity/.NET platforms).
 
 ### Loading Speed
 
-| Operation         | Time Complexity | Notes                   |
-| ----------------- | --------------- | ----------------------- |
-| Decompression     | O(N)            | Only if compressed      |
-| Deserialize       | O(N)            | Single pass             |
-| Build lookup      | O(N)            | Creates dictionary once |
-| Runtime lookup    | O(1)            | Dictionary access       |
+| Operation      | Time Complexity | Notes                   |
+| -------------- | --------------- | ----------------------- |
+| Decompression  | O(N)            | Only if compressed      |
+| Deserialize    | O(N)            | Single pass             |
+| Build lookup   | O(N)            | Creates dictionary once |
+| Runtime lookup | O(1)            | Dictionary access       |
 
 ### Memory Usage
 
-| Phase             | Memory                    |
-| ----------------- | ------------------------- |
-| Serialization     | ~2x file size (temporary) |
-| Deserialization   | ~1.5x file size (runtime) |
-| Runtime lookup    | O(1) additional           |
+| Phase           | Memory                    |
+| --------------- | ------------------------- |
+| Serialization   | ~2x file size (temporary) |
+| Deserialization | ~1.5x file size (runtime) |
+| Runtime lookup  | O(1) additional           |
 
 ---
 

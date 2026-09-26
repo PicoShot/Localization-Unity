@@ -17,6 +17,7 @@ A lightweight, zero-runtime-dependency, high-performance localization system for
 - **Zero Runtime Dependencies** - Only requires TextMeshPro (optional for basic usage)
 - **Anti-Tamper** - Optional file hash verification to protect translation files
 - **Editor Tools** - Built-in Language Editor with DeepL/Gemini translation integration
+- **MCP Server** - Built-in Model Context Protocol server
 - **Multiple Component Support** - Works with TMP_Text, TMP_Dropdown, Legacy UI, and TextMesh
 - **Format Parameters** - String formatting support with `{0}`, `{1}` placeholders
 - **Mixed LTR/RTL Support** - Smart token-based bi-directional text processing for seamless Arabic/Persian integration in English contexts and vice versa
@@ -78,6 +79,7 @@ string[] options = LocalizationManager.GetArray("menu_options");
 ## Documentation
 
 - [Usage Guide](Docs/Usage.md) - Complete API documentation and usage examples
+- [MCP Server](Docs/MCP.md) - Connect AI agents to your locales over HTTP
 - [Keybinds](Docs/Keybinds.md) - Language Editor keyboard shortcuts
 - [BLOC Format](Docs/BLOC_FORMAT.md) - Binary localization file format
 - [FAQ](Docs/FAQ.md) - Frequently asked questions
