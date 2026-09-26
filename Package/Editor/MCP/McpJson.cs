@@ -99,10 +99,10 @@ namespace PicoShot.Localization.Editor.Mcp
                     sb.Append(b ? "true" : "false");
                     break;
                 case long l:
-                    sb.Append(l.ToString(CultureInfo.InvariantCulture));
+                    WriteLong(sb, l);
                     break;
                 case int i:
-                    sb.Append(i.ToString(CultureInfo.InvariantCulture));
+                    WriteLong(sb, i);
                     break;
                 case double d:
                     if (double.IsInfinity(d) || double.IsNaN(d))
@@ -150,6 +150,15 @@ namespace PicoShot.Localization.Editor.Mcp
             }
         }
 
+        private static void WriteLong(StringBuilder sb, long value)
+        {
+            Span<char> buffer = stackalloc char[24];
+            if (value.TryFormat(buffer, out int written, default, CultureInfo.InvariantCulture))
+                sb.Append(buffer.Slice(0, written));
+            else
+                sb.Append(value.ToString(CultureInfo.InvariantCulture));
+        }
+
         private static void WriteString(StringBuilder sb, string s)
         {
             sb.Append('"');
@@ -167,8 +176,10 @@ namespace PicoShot.Localization.Editor.Mcp
                     default:
                         if (c < 0x20)
                         {
-                            sb.Append("\\u");
-                            sb.Append(((int)c).ToString("x4"));
+                            const string hex = "0123456789abcdef";
+                            sb.Append("\\u00");
+                            sb.Append(hex[c >> 4]);
+                            sb.Append(hex[c & 15]);
                         }
                         else
                         {
@@ -223,7 +234,7 @@ namespace PicoShot.Localization.Editor.Mcp
             private Dictionary<string, object> ParseObject()
             {
                 var dict = new Dictionary<string, object>(StringComparer.Ordinal);
-                _pos++; // {
+                _pos++;
                 SkipWhitespace();
                 if (_pos < _json.Length && _json[_pos] == '}')
                 {
@@ -255,7 +266,7 @@ namespace PicoShot.Localization.Editor.Mcp
             private List<object> ParseArray()
             {
                 var list = new List<object>();
-                _pos++; // [
+                _pos++;
                 SkipWhitespace();
                 if (_pos < _json.Length && _json[_pos] == ']')
                 {
@@ -278,8 +289,25 @@ namespace PicoShot.Localization.Editor.Mcp
 
             private string ParseString()
             {
-                var sb = new StringBuilder();
-                _pos++; // opening quote
+                int start = _pos + 1;
+                int scan = start;
+                while (scan < _json.Length)
+                {
+                    char sc = _json[scan];
+                    if (sc == '"')
+                    {
+                        _pos = scan + 1;
+                        return _json.Substring(start, scan - start);
+                    }
+                    if (sc == '\\') break;
+                    scan++;
+                }
+                if (scan >= _json.Length)
+                    throw new FormatException("Unterminated JSON string.");
+
+                var sb = new StringBuilder(scan - start + 16);
+                sb.Append(_json, start, scan - start);
+                _pos = scan;
                 while (true)
                 {
                     if (_pos >= _json.Length)
@@ -304,17 +332,18 @@ namespace PicoShot.Localization.Editor.Mcp
                             case 'u':
                                 if (_pos + 4 > _json.Length)
                                     throw new FormatException("Invalid unicode escape in JSON.");
-                                string hex = _json.Substring(_pos, 4);
-                                _pos += 4;
-                                if (!int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int code))
+                                int code = (HexValue(_json[_pos]) << 12) | (HexValue(_json[_pos + 1]) << 8) |
+                                           (HexValue(_json[_pos + 2]) << 4) | HexValue(_json[_pos + 3]);
+                                if (code < 0)
                                     throw new FormatException("Invalid unicode escape in JSON.");
-                                // Surrogate pair support.
+                                _pos += 4;
+
                                 if (code >= 0xD800 && code <= 0xDBFF && _pos + 6 <= _json.Length &&
                                     _json[_pos] == '\\' && _json[_pos + 1] == 'u')
                                 {
-                                    string lowHex = _json.Substring(_pos + 2, 4);
-                                    if (int.TryParse(lowHex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int low) &&
-                                        low >= 0xDC00 && low <= 0xDFFF)
+                                    int low = (HexValue(_json[_pos + 2]) << 12) | (HexValue(_json[_pos + 3]) << 8) |
+                                              (HexValue(_json[_pos + 4]) << 4) | HexValue(_json[_pos + 5]);
+                                    if (low >= 0xDC00 && low <= 0xDFFF)
                                     {
                                         _pos += 6;
                                         sb.Append(char.ConvertFromUtf32(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)));
@@ -332,6 +361,14 @@ namespace PicoShot.Localization.Editor.Mcp
                         sb.Append(c);
                     }
                 }
+            }
+
+            private static int HexValue(char c)
+            {
+                if (c >= '0' && c <= '9') return c - '0';
+                if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+                if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+                return -1;
             }
 
             private object ParseNumber()
@@ -353,18 +390,21 @@ namespace PicoShot.Localization.Editor.Mcp
                     if (_pos < _json.Length && (_json[_pos] == '+' || _json[_pos] == '-')) _pos++;
                     while (_pos < _json.Length && char.IsDigit(_json[_pos])) _pos++;
                 }
-                string token = _json.Substring(start, _pos - start);
+                ReadOnlySpan<char> token = _json.AsSpan(start, _pos - start);
                 if (!isDouble && long.TryParse(token, NumberStyles.Integer, CultureInfo.InvariantCulture, out long l))
                     return l;
                 if (double.TryParse(token, NumberStyles.Float, CultureInfo.InvariantCulture, out double d))
                     return d;
-                throw new FormatException($"Invalid JSON number '{token}'.");
+                throw new FormatException($"Invalid JSON number '{token.ToString()}'.");
             }
 
             private void Expect(string literal)
             {
-                if (_pos + literal.Length > _json.Length || _json.Substring(_pos, literal.Length) != literal)
-                    throw new FormatException($"Invalid JSON value, expected '{literal}'.");
+                for (int k = 0; k < literal.Length; k++)
+                {
+                    if (_pos + k >= _json.Length || _json[_pos + k] != literal[k])
+                        throw new FormatException($"Invalid JSON value, expected '{literal}'.");
+                }
                 _pos += literal.Length;
             }
         }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace PicoShot.Localization.Editor.Mcp
 {
@@ -11,7 +10,11 @@ namespace PicoShot.Localization.Editor.Mcp
     {
         public const int DefaultListLimit = 200;
 
-        public static List<object> GetToolDefinitions()
+        private static readonly List<object> CachedToolDefinitions = BuildToolDefinitions();
+
+        public static List<object> GetToolDefinitions() => CachedToolDefinitions;
+
+        private static List<object> BuildToolDefinitions()
         {
             return new List<object>
             {
@@ -161,11 +164,17 @@ namespace PicoShot.Localization.Editor.Mcp
             switch (name)
             {
                 case "list_languages":
-                    return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
                     {
-                        ["languages"] = store.ListLanguages().Select(l => (object)l).ToList(),
-                        ["default"] = store.DefaultLanguage,
-                    });
+                        var langs = store.ListLanguages();
+                        var wired = new List<object>(langs.Count);
+                        foreach (string l in langs)
+                            wired.Add(l);
+                        return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
+                        {
+                            ["languages"] = wired,
+                            ["default"] = store.DefaultLanguage,
+                        });
+                    }
 
                 case "list_keys":
                     return Ok(ListKeys(args, store));
@@ -328,9 +337,19 @@ namespace PicoShot.Localization.Editor.Mcp
         private static object ToWire(object value)
         {
             if (value is List<string> list)
-                return list.Select(s => (object)(s ?? string.Empty)).ToList();
+            {
+                var wired = new List<object>(list.Count);
+                foreach (string s in list)
+                    wired.Add((object)(s ?? string.Empty));
+                return wired;
+            }
             if (value is string[] arr)
-                return arr.Select(s => (object)(s ?? string.Empty)).ToList();
+            {
+                var wired = new List<object>(arr.Length);
+                foreach (string s in arr)
+                    wired.Add((object)(s ?? string.Empty));
+                return wired;
+            }
             return value?.ToString() ?? string.Empty;
         }
 
@@ -362,17 +381,36 @@ namespace PicoShot.Localization.Editor.Mcp
             if (offset < 0) offset = 0;
 
             var all = store.LoadAll();
-            var keys = new SortedSet<string>(StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            var keys = new List<string>();
             foreach (var lang in all.Values)
+            {
                 foreach (var k in lang.Keys)
-                    keys.Add(k);
+                {
+                    if (seen.Add(k))
+                        keys.Add(k);
+                }
+            }
+            keys.Sort(StringComparer.Ordinal);
 
-            var filtered = keys.Where(k =>
-                (search.Length == 0 || k.ToLowerInvariant().Contains(search)) &&
-                (view.Length == 0 || IsInView(k, view))).ToList();
-
-            int total = filtered.Count;
-            var page = filtered.Skip(offset).Take(limit).Select(k => (object)k).ToList();
+            var page = new List<object>(limit);
+            int total = 0;
+            int skipped = 0;
+            foreach (string k in keys)
+            {
+                if (search.Length != 0 && k.ToLowerInvariant().Contains(search) == false)
+                    continue;
+                if (view.Length != 0 && IsInView(k, view) == false)
+                    continue;
+                total++;
+                if (skipped < offset)
+                {
+                    skipped++;
+                    continue;
+                }
+                if (page.Count < limit)
+                    page.Add(k);
+            }
             return new Dictionary<string, object>(StringComparer.Ordinal)
             {
                 ["keys"] = page,
@@ -400,18 +438,15 @@ namespace PicoShot.Localization.Editor.Mcp
             if (items.Count > MaxBatchItems)
                 return Fail($"Too many items ({items.Count}). Max {MaxBatchItems} per call; split into multiple calls.");
 
-            int applied = 0, failed = 0;
+            var batch = new List<McpBatchItem>(items.Count);
             var results = new List<object>(items.Count);
+            int failed = 0;
             foreach (object item in items)
             {
                 if (!(item is Dictionary<string, object> entry))
                 {
                     failed++;
-                    results.Add(new Dictionary<string, object>(StringComparer.Ordinal)
-                    {
-                        ["ok"] = false,
-                        ["error"] = "Item must be an object with key, lang and value.",
-                    });
+                    results.Add(BatchError(null, null, "Item must be an object with key, lang and value."));
                     continue;
                 }
                 string key = McpJson.GetString(entry, "key");
@@ -421,36 +456,34 @@ namespace PicoShot.Localization.Editor.Mcp
                 if (string.IsNullOrEmpty(key) || string.IsNullOrEmpty(lang) || value == null)
                 {
                     failed++;
-                    results.Add(new Dictionary<string, object>(StringComparer.Ordinal)
-                    {
-                        ["ok"] = false,
-                        ["key"] = key,
-                        ["lang"] = lang,
-                        ["error"] = "Each item needs key (string), lang (string) and value (string or string array).",
-                    });
+                    results.Add(BatchError(key, lang, "Each item needs key (string), lang (string) and value (string or string array)."));
                     continue;
                 }
-                try
+                batch.Add(new McpBatchItem(key, lang, value));
+                results.Add(null);
+            }
+
+            var outcomes = store.SetMany(batch);
+            int applied = 0;
+            int outcomeIndex = 0;
+            for (int i = 0; i < results.Count; i++)
+            {
+                if (results[i] != null) continue;
+                var outcome = outcomes[outcomeIndex++];
+                if (outcome.Ok)
                 {
-                    store.SetTranslation(key, lang, value);
                     applied++;
-                    results.Add(new Dictionary<string, object>(StringComparer.Ordinal)
+                    results[i] = new Dictionary<string, object>(StringComparer.Ordinal)
                     {
                         ["ok"] = true,
-                        ["key"] = key,
-                        ["lang"] = lang,
-                    });
+                        ["key"] = outcome.Key,
+                        ["lang"] = outcome.Lang,
+                    };
                 }
-                catch (InvalidOperationException ex)
+                else
                 {
                     failed++;
-                    results.Add(new Dictionary<string, object>(StringComparer.Ordinal)
-                    {
-                        ["ok"] = false,
-                        ["key"] = key,
-                        ["lang"] = lang,
-                        ["error"] = ex.Message,
-                    });
+                    results[i] = BatchError(outcome.Key, outcome.Lang, outcome.Error);
                 }
             }
 
@@ -460,7 +493,18 @@ namespace PicoShot.Localization.Editor.Mcp
                 ["failed"] = (long)failed,
                 ["results"] = results,
             };
-            return (failed > 0, result);
+            return (failed > 0, (object)result);
+        }
+
+        private static Dictionary<string, object> BatchError(string key, string lang, string error)
+        {
+            return new Dictionary<string, object>(StringComparer.Ordinal)
+            {
+                ["ok"] = false,
+                ["key"] = key,
+                ["lang"] = lang,
+                ["error"] = error,
+            };
         }
 
         private static object Validate(McpLocalesStore store)
@@ -480,7 +524,12 @@ namespace PicoShot.Localization.Editor.Mcp
             {
                 if (kvp.Value < all.Count)
                 {
-                    var missing = all.Keys.Where(l => !all[l].ContainsKey(kvp.Key)).ToList();
+                    var missing = new List<string>();
+                    foreach (var lang in all)
+                    {
+                        if (!lang.Value.ContainsKey(kvp.Key))
+                            missing.Add(lang.Key);
+                    }
                     issues.Add($"Key '{kvp.Key}' missing in: {string.Join(", ", missing)}.");
                 }
             }
@@ -489,24 +538,34 @@ namespace PicoShot.Localization.Editor.Mcp
             {
                 foreach (var kvp in lang.Value)
                 {
-                    if (kvp.Value is List<string> list)
-                    {
-                        if (list.Count == 0 || list.All(string.IsNullOrWhiteSpace))
-                            empty.Add($"{lang.Key}:{kvp.Key}");
-                    }
-                    else if (string.IsNullOrWhiteSpace(kvp.Value?.ToString()))
-                    {
+                    if (IsEmptyCell(kvp.Value))
                         empty.Add($"{lang.Key}:{kvp.Key}");
-                    }
                 }
             }
+            var languages = new List<object>(all.Count);
+            foreach (var lang in all.Keys)
+                languages.Add(lang);
             return new Dictionary<string, object>(StringComparer.Ordinal)
             {
-                ["languages"] = all.Keys.Select(l => (object)l).ToList(),
+                ["languages"] = languages,
                 ["totalKeys"] = (long)keyCounts.Count,
                 ["issues"] = issues,
                 ["emptyCells"] = empty,
             };
+        }
+
+        private static bool IsEmptyCell(object value)
+        {
+            if (value is List<string> list)
+            {
+                foreach (string s in list)
+                {
+                    if (!string.IsNullOrWhiteSpace(s))
+                        return false;
+                }
+                return true;
+            }
+            return string.IsNullOrWhiteSpace(value?.ToString());
         }
     }
 }

@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using PicoShot.Localization.Bloc;
 using PicoShot.Localization.Data;
 
@@ -109,7 +108,9 @@ namespace PicoShot.Localization.Editor.Mcp
         /// <summary>Lists language codes found on disk (validated). Used for diagnostics.</summary>
         public List<string> ScanLanguages()
         {
-            return LoadAll().Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+            var list = new List<string>(LoadAll().Keys);
+            list.Sort(StringComparer.OrdinalIgnoreCase);
+            return list;
         }
     }
 }

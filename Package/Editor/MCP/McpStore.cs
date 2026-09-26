@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace PicoShot.Localization.Editor.Mcp
 {
@@ -14,6 +13,38 @@ namespace PicoShot.Localization.Editor.Mcp
         void DeleteLanguage(string languageCode);
         bool IsValidLanguage(string languageCode);
         string DefaultLanguage { get; }
+    }
+
+    /// <summary>One validated batch entry: key and lang are non-empty, value is string or List&lt;string&gt;.</summary>
+    public readonly struct McpBatchItem
+    {
+        public readonly string Key;
+        public readonly string Lang;
+        public readonly object Value;
+
+        public McpBatchItem(string key, string lang, object value)
+        {
+            Key = key;
+            Lang = lang;
+            Value = value;
+        }
+    }
+
+    /// <summary>Per-item batch outcome. Error is null when Ok is true.</summary>
+    public readonly struct McpBatchOutcome
+    {
+        public readonly bool Ok;
+        public readonly string Key;
+        public readonly string Lang;
+        public readonly string Error;
+
+        public McpBatchOutcome(bool ok, string key, string lang, string error)
+        {
+            Ok = ok;
+            Key = key;
+            Lang = lang;
+            Error = error;
+        }
     }
 
     /// <summary>
@@ -36,7 +67,9 @@ namespace PicoShot.Localization.Editor.Mcp
             lock (_lock)
             {
                 var all = _io.LoadAll();
-                return all.Keys.OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+                var list = new List<string>(all.Keys);
+                list.Sort(StringComparer.OrdinalIgnoreCase);
+                return list;
             }
         }
 
@@ -53,21 +86,19 @@ namespace PicoShot.Localization.Editor.Mcp
             lock (_lock)
             {
                 var all = _io.LoadAll();
-                foreach (var lang in all.Values)
-                {
-                    foreach (var existingKey in lang.Keys)
-                    {
-                        if (string.Equals(existingKey, key, StringComparison.Ordinal))
-                            goto Found;
-                    }
-                }
-                return null;
-            Found:
-                var result = new Dictionary<string, object>(StringComparer.Ordinal);
+                Dictionary<string, object> result = null;
                 foreach (var kvp in all)
                 {
-                    if (kvp.Value.TryGetValue(key, out object value))
-                        result[kvp.Key] = CloneValue(value);
+                    foreach (var existingKey in kvp.Value.Keys)
+                    {
+                        if (string.Equals(existingKey, key, StringComparison.Ordinal))
+                        {
+                            if (result == null)
+                                result = new Dictionary<string, object>(StringComparer.Ordinal);
+                            result[kvp.Key] = CloneValue(kvp.Value[existingKey]);
+                            break;
+                        }
+                    }
                 }
                 return result;
             }
@@ -78,8 +109,15 @@ namespace PicoShot.Localization.Editor.Mcp
             lock (_lock)
             {
                 var all = _io.LoadAll();
-                return all.Values.Any(lang =>
-                    lang.Keys.Any(k => string.Equals(k, key, StringComparison.Ordinal)));
+                foreach (var lang in all.Values)
+                {
+                    foreach (var existingKey in lang.Keys)
+                    {
+                        if (string.Equals(existingKey, key, StringComparison.Ordinal))
+                            return true;
+                    }
+                }
+                return false;
             }
         }
 
@@ -90,11 +128,66 @@ namespace PicoShot.Localization.Editor.Mcp
                 var all = _io.LoadAll();
                 if (!all.TryGetValue(languageCode, out var langData))
                     throw new InvalidOperationException($"Unknown language '{languageCode}'. Use add_language first.");
-                string actualKey = langData.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.Ordinal));
+                string actualKey = FindKey(langData, key);
                 if (actualKey == null)
                     throw new InvalidOperationException($"Unknown key '{key}'. Use add_key first.");
                 langData[actualKey] = CloneValue(value);
                 _io.SaveLanguage(languageCode, langData);
+            }
+        }
+
+        /// <summary>
+        /// Applies a whole batch with a single load.
+        /// </summary>
+        public List<McpBatchOutcome> SetMany(IList<McpBatchItem> items)
+        {
+            var outcomes = new List<McpBatchOutcome>(items.Count);
+            lock (_lock)
+            {
+                var all = _io.LoadAll();
+                var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                for (int i = 0; i < items.Count; i++)
+                {
+                    var item = items[i];
+                    string actualLang = FindLanguage(all, item.Lang);
+                    if (actualLang == null)
+                    {
+                        outcomes.Add(new McpBatchOutcome(false, item.Key, item.Lang,
+                            $"Unknown language '{item.Lang}'. Use add_language first."));
+                        continue;
+                    }
+                    var langData = all[actualLang];
+                    string actualKey = FindKey(langData, item.Key);
+                    if (actualKey == null)
+                    {
+                        outcomes.Add(new McpBatchOutcome(false, item.Key, item.Lang,
+                            $"Unknown key '{item.Key}'. Use add_key first."));
+                        continue;
+                    }
+                    langData[actualKey] = CloneValue(item.Value);
+                    touched.Add(actualLang);
+                    outcomes.Add(new McpBatchOutcome(true, item.Key, item.Lang, null));
+                }
+
+                foreach (string lang in touched)
+                {
+                    try
+                    {
+                        _io.SaveLanguage(lang, all[lang]);
+                    }
+                    catch (Exception ex)
+                    {
+                        for (int i = 0; i < items.Count; i++)
+                        {
+                            if (!outcomes[i].Ok) continue;
+                            if (string.Equals(items[i].Lang, lang, StringComparison.OrdinalIgnoreCase))
+                                outcomes[i] = new McpBatchOutcome(false, items[i].Key, items[i].Lang,
+                                    $"Save failed: {ex.Message}");
+                        }
+                    }
+                }
+                return outcomes;
             }
         }
 
@@ -105,23 +198,22 @@ namespace PicoShot.Localization.Editor.Mcp
                 var all = _io.LoadAll();
                 foreach (var langData in all.Values)
                 {
-                    if (langData.Keys.Any(k => string.Equals(k, key, StringComparison.OrdinalIgnoreCase)))
+                    if (ContainsKeyOrdinalIgnoreCase(langData, key))
                         throw new InvalidOperationException($"Key '{key}' already exists.");
                 }
                 foreach (var kvp in all)
                 {
+                    bool isDefault = string.Equals(kvp.Key, defaultLanguage, StringComparison.OrdinalIgnoreCase);
                     object value;
                     if (isArray)
                     {
-                        value = string.Equals(kvp.Key, defaultLanguage, StringComparison.OrdinalIgnoreCase) && defaultText != null
+                        value = isDefault && defaultText != null
                             ? new List<string> { defaultText }
                             : new List<string> { string.Empty };
                     }
                     else
                     {
-                        value = string.Equals(kvp.Key, defaultLanguage, StringComparison.OrdinalIgnoreCase)
-                            ? (defaultText ?? string.Empty)
-                            : string.Empty;
+                        value = isDefault ? (defaultText ?? string.Empty) : string.Empty;
                     }
                     var updated = new Dictionary<string, object>(kvp.Value, StringComparer.Ordinal)
                     {
@@ -137,16 +229,19 @@ namespace PicoShot.Localization.Editor.Mcp
             lock (_lock)
             {
                 var all = _io.LoadAll();
-                bool found = false;
                 foreach (var langData in all.Values)
                 {
-                    if (langData.Keys.Any(k => !string.Equals(k, oldKey, StringComparison.Ordinal) &&
-                                               string.Equals(k, newKey, StringComparison.OrdinalIgnoreCase)))
-                        throw new InvalidOperationException($"Key '{newKey}' already exists.");
+                    foreach (var k in langData.Keys)
+                    {
+                        if (!string.Equals(k, oldKey, StringComparison.Ordinal) &&
+                            string.Equals(k, newKey, StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException($"Key '{newKey}' already exists.");
+                    }
                 }
+                bool found = false;
                 foreach (var kvp in all)
                 {
-                    string actualOld = kvp.Value.Keys.FirstOrDefault(k => string.Equals(k, oldKey, StringComparison.Ordinal));
+                    string actualOld = FindKey(kvp.Value, oldKey);
                     if (actualOld == null) continue;
                     found = true;
                     var updated = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -166,7 +261,7 @@ namespace PicoShot.Localization.Editor.Mcp
                 bool found = false;
                 foreach (var kvp in all)
                 {
-                    string actual = kvp.Value.Keys.FirstOrDefault(k => string.Equals(k, key, StringComparison.Ordinal));
+                    string actual = FindKey(kvp.Value, key);
                     if (actual == null) continue;
                     found = true;
                     var updated = new Dictionary<string, object>(kvp.Value, StringComparer.Ordinal);
@@ -184,9 +279,17 @@ namespace PicoShot.Localization.Editor.Mcp
                 if (!_io.IsValidLanguage(languageCode))
                     throw new InvalidOperationException($"Unsupported language code '{languageCode}'.");
                 var all = _io.LoadAll();
-                if (all.Keys.Any(k => string.Equals(k, languageCode, StringComparison.OrdinalIgnoreCase)))
-                    throw new InvalidOperationException($"Language '{languageCode}' already exists.");
-                var reference = all.Values.FirstOrDefault();
+                foreach (var existing in all.Keys)
+                {
+                    if (string.Equals(existing, languageCode, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"Language '{languageCode}' already exists.");
+                }
+                Dictionary<string, object> reference = null;
+                foreach (var langData in all.Values)
+                {
+                    reference = langData;
+                    break;
+                }
                 var fresh = new Dictionary<string, object>(StringComparer.Ordinal);
                 if (reference != null)
                 {
@@ -206,13 +309,43 @@ namespace PicoShot.Localization.Editor.Mcp
             lock (_lock)
             {
                 var all = _io.LoadAll();
-                string actual = all.Keys.FirstOrDefault(k => string.Equals(k, languageCode, StringComparison.OrdinalIgnoreCase));
+                string actual = FindLanguage(all, languageCode);
                 if (actual == null) return false;
                 if (all.Count <= 1)
                     throw new InvalidOperationException("Cannot remove the last remaining language.");
                 _io.DeleteLanguage(actual);
                 return true;
             }
+        }
+
+        private static string FindKey(Dictionary<string, object> langData, string key)
+        {
+            foreach (var existingKey in langData.Keys)
+            {
+                if (string.Equals(existingKey, key, StringComparison.Ordinal))
+                    return existingKey;
+            }
+            return null;
+        }
+
+        private static bool ContainsKeyOrdinalIgnoreCase(Dictionary<string, object> langData, string key)
+        {
+            foreach (var existingKey in langData.Keys)
+            {
+                if (string.Equals(existingKey, key, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        private static string FindLanguage(Dictionary<string, Dictionary<string, object>> all, string languageCode)
+        {
+            foreach (var existing in all.Keys)
+            {
+                if (string.Equals(existing, languageCode, StringComparison.OrdinalIgnoreCase))
+                    return existing;
+            }
+            return null;
         }
 
         internal static object CloneValue(object value)

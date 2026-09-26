@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace PicoShot.Localization.Editor.Mcp
 {
@@ -184,15 +183,30 @@ namespace PicoShot.Localization.Editor.Mcp
             if (!uri.StartsWith(prefix, StringComparison.Ordinal)) return (false, null);
             string lang = uri.Substring(prefix.Length);
             var all = store.LoadAll();
-            string actual = all.Keys.FirstOrDefault(k => string.Equals(k, lang, StringComparison.OrdinalIgnoreCase));
+            string actual = null;
+            foreach (var existing in all.Keys)
+            {
+                if (string.Equals(existing, lang, StringComparison.OrdinalIgnoreCase))
+                {
+                    actual = existing;
+                    break;
+                }
+            }
             if (actual == null) return (false, null);
             var wire = new Dictionary<string, object>(StringComparer.Ordinal);
             foreach (var kvp in all[actual])
             {
                 if (kvp.Value is List<string> list)
-                    wire[kvp.Key] = list.Select(s => (object)(s ?? string.Empty)).ToList();
+                {
+                    var wired = new List<object>(list.Count);
+                    foreach (string s in list)
+                        wired.Add((object)(s ?? string.Empty));
+                    wire[kvp.Key] = wired;
+                }
                 else
+                {
                     wire[kvp.Key] = kvp.Value?.ToString() ?? string.Empty;
+                }
             }
             return (true, new Dictionary<string, object>(StringComparer.Ordinal)
             {
