@@ -63,6 +63,20 @@ namespace PicoShot.Localization
 
             CompilationPipeline.compilationStarted += OnBeforeCompile;
             EditorApplication.playModeStateChanged += OnPlayModeChanged;
+            Editor.Mcp.LocalizationMcpServer.ExternalChanged += OnMcpExternalChanged;
+        }
+
+        private void OnMcpExternalChanged()
+        {
+            if (_data == null) return;
+            if (_data.HasUnsavedChanges)
+            {
+                ShowNotification(new GUIContent("MCP server changed locale files on disk. Reopen the editor to load them (saving now would overwrite)."));
+                return;
+            }
+            LoadLanguages(out _);
+            ShowNotification(new GUIContent("Reloaded locale files changed via MCP."));
+            Repaint();
         }
 
         private void OnDisable()
@@ -593,8 +607,9 @@ namespace PicoShot.Localization
             Repaint();
         }
 
-        private static void UnregisterEventHandlers()
+        private void UnregisterEventHandlers()
         {
+            Editor.Mcp.LocalizationMcpServer.ExternalChanged -= OnMcpExternalChanged;
             LocalizationManager.Dispose();
         }
 
