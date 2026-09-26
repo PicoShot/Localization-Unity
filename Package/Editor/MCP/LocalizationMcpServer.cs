@@ -312,6 +312,12 @@ namespace PicoShot.Localization.Editor.Mcp
                 WriteText(context, 413, "application/json", "{\"error\":\"Request too large.\"}");
                 return;
             }
+            if (!IsAllowedOrigin(request.Headers["Origin"]))
+            {
+                WriteText(context, 403, "application/json",
+                    "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Forbidden: cross-origin POST rejected.\"}}");
+                return;
+            }
             string body;
             using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
                 body = reader.ReadToEnd();
@@ -321,15 +327,21 @@ namespace PicoShot.Localization.Editor.Mcp
                 return;
             }
 
+            var headers = new McpRequestHeaders(
+                request.Headers["MCP-Protocol-Version"],
+                request.Headers["Mcp-Method"],
+                request.Headers["Mcp-Name"]);
+
             IMcpLocaleIO io;
             lock (StateLock)
             {
                 io = _io;
             }
             string responseJson;
+            int httpStatus;
             try
             {
-                responseJson = McpProtocol.HandleRequest(body, io);
+                responseJson = McpProtocol.HandleRequest(body, io, headers, out httpStatus);
             }
             catch (Exception ex)
             {
@@ -342,7 +354,25 @@ namespace PicoShot.Localization.Editor.Mcp
                 WriteEmpty(context, 202);
                 return;
             }
-            WriteText(context, 200, "application/json", responseJson);
+            WriteText(context, httpStatus, "application/json", responseJson);
+        }
+
+        private static bool IsAllowedOrigin(string origin)
+        {
+            if (string.IsNullOrEmpty(origin)) return true;
+            try
+            {
+                var uri = new Uri(origin);
+                if (string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (IPAddress.TryParse(uri.Host, out var address))
+                    return IPAddress.IsLoopback(address);
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+            return false;
         }
 
         private static void WriteText(HttpListenerContext context, int status, string contentType, string text)
