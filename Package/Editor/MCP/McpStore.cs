@@ -53,7 +53,8 @@ namespace PicoShot.Localization.Editor.Mcp
     public sealed class McpLocalesStore
     {
         private readonly IMcpLocaleIO _io;
-        private readonly object _lock = new object();
+
+        private static readonly object FileLock = new();
 
         public McpLocalesStore(IMcpLocaleIO io)
         {
@@ -64,7 +65,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public List<string> ListLanguages()
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 var list = new List<string>(all.Keys);
@@ -75,7 +76,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public Dictionary<string, Dictionary<string, object>> LoadAll()
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 return _io.LoadAll();
             }
@@ -83,7 +84,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public Dictionary<string, object> GetKey(string key)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 Dictionary<string, object> result = null;
@@ -106,7 +107,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public bool ContainsKey(string key)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 foreach (var lang in all.Values)
@@ -123,14 +124,14 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public void SetTranslation(string key, string languageCode, object value)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 if (!all.TryGetValue(languageCode, out var langData))
-                    throw new InvalidOperationException($"Unknown language '{languageCode}'. Use add_language first.");
+                    throw new InvalidOperationException($"Unknown language '{languageCode}'.{AvailableSuffix(all)} Use add_language first.");
                 string actualKey = FindKey(langData, key);
                 if (actualKey == null)
-                    throw new InvalidOperationException($"Unknown key '{key}'. Use add_key first.");
+                    throw new InvalidOperationException(UnknownKeyMessage(all, key));
                 langData[actualKey] = CloneValue(value);
                 _io.SaveLanguage(languageCode, langData);
             }
@@ -142,7 +143,7 @@ namespace PicoShot.Localization.Editor.Mcp
         public List<McpBatchOutcome> SetMany(IList<McpBatchItem> items)
         {
             var outcomes = new List<McpBatchOutcome>(items.Count);
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 var touched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -154,7 +155,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     if (actualLang == null)
                     {
                         outcomes.Add(new McpBatchOutcome(false, item.Key, item.Lang,
-                            $"Unknown language '{item.Lang}'. Use add_language first."));
+                            $"Unknown language '{item.Lang}'.{AvailableSuffix(all)} Use add_language first."));
                         continue;
                     }
                     var langData = all[actualLang];
@@ -162,7 +163,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     if (actualKey == null)
                     {
                         outcomes.Add(new McpBatchOutcome(false, item.Key, item.Lang,
-                            $"Unknown key '{item.Key}'. Use add_key first."));
+                            UnknownKeyMessage(all, item.Key)));
                         continue;
                     }
                     langData[actualKey] = CloneValue(item.Value);
@@ -193,7 +194,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public void AddKey(string key, bool isArray, string defaultText, string defaultLanguage)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 foreach (var langData in all.Values)
@@ -226,7 +227,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public bool RenameKey(string oldKey, string newKey)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 foreach (var langData in all.Values)
@@ -255,7 +256,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public bool DeleteKey(string key)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 bool found = false;
@@ -274,7 +275,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public void AddLanguage(string languageCode)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 if (!_io.IsValidLanguage(languageCode))
                     throw new InvalidOperationException($"Unsupported language code '{languageCode}'.");
@@ -306,7 +307,7 @@ namespace PicoShot.Localization.Editor.Mcp
 
         public bool RemoveLanguage(string languageCode)
         {
-            lock (_lock)
+            lock (FileLock)
             {
                 var all = _io.LoadAll();
                 string actual = FindLanguage(all, languageCode);
@@ -346,6 +347,122 @@ namespace PicoShot.Localization.Editor.Mcp
                     return existing;
             }
             return null;
+        }
+
+        public List<string> SuggestSimilarKeys(string key, int maxSuggestions = 3)
+        {
+            lock (FileLock)
+            {
+                return FindSimilarKeys(_io.LoadAll(), key, maxSuggestions);
+            }
+        }
+
+        private static string UnknownKeyMessage(Dictionary<string, Dictionary<string, object>> all, string key)
+        {
+            var similar = FindSimilarKeys(all, key, 3);
+            string hint = similar.Count > 0 ? $" Did you mean: {string.Join(", ", similar)}?" : string.Empty;
+            return $"Unknown key '{key}'. Use add_key first.{hint}";
+        }
+
+        private static List<string> FindSimilarKeys(Dictionary<string, Dictionary<string, object>> all, string key, int max)
+        {
+            var exact = new List<string>();
+            var prefix = new List<string>();
+            var fuzzy = new List<KeyValuePair<int, string>>();
+            var contains = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var langData in all.Values)
+            {
+                foreach (var existing in langData.Keys)
+                {
+                    if (!seen.Add(existing)) continue;
+                    if (string.Equals(existing, key, StringComparison.OrdinalIgnoreCase))
+                        exact.Add(existing);
+                    else if (existing.StartsWith(key, StringComparison.OrdinalIgnoreCase) ||
+                             key.StartsWith(existing, StringComparison.OrdinalIgnoreCase))
+                        prefix.Add(existing);
+                    else if (IsCloseTypo(existing, key))
+                        fuzzy.Add(new KeyValuePair<int, string>(EditDistanceCapped(existing, key, 2), existing));
+                    else if (existing.IndexOf(key, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                             key.IndexOf(existing, StringComparison.OrdinalIgnoreCase) >= 0)
+                        contains.Add(existing);
+                }
+            }
+            fuzzy.Sort((x, y) =>
+            {
+                int c = x.Key.CompareTo(y.Key);
+                return c != 0 ? c : string.Compare(x.Value, y.Value, StringComparison.Ordinal);
+            });
+            var result = new List<string>(max);
+            AddRanked(result, exact, max);
+            AddRanked(result, prefix, max);
+            foreach (var candidate in fuzzy)
+            {
+                if (result.Count >= max) return result;
+                result.Add(candidate.Value);
+            }
+            AddRanked(result, contains, max);
+            return result;
+        }
+
+        private static bool IsCloseTypo(string existing, string key)
+        {
+            if (key.Length < 3 || existing.Length < 3) return false;
+            int distance = EditDistanceCapped(existing, key, 2);
+            return distance <= 2 && distance * 2 < key.Length;
+        }
+
+        private static int EditDistanceCapped(string a, string b, int cap)
+        {
+            int n = a.Length, m = b.Length;
+            if (n == 0) return m;
+            if (m == 0) return n;
+            if (Math.Abs(n - m) > cap) return cap + 1;
+            if (n > 64 || m > 64) return cap + 1;
+            Span<int> prev = stackalloc int[65];
+            Span<int> curr = stackalloc int[65];
+            prev = prev.Slice(0, m + 1);
+            curr = curr.Slice(0, m + 1);
+            for (int j = 0; j <= m; j++) prev[j] = j;
+            for (int i = 1; i <= n; i++)
+            {
+                curr[0] = i;
+                int rowMin = i;
+                for (int j = 1; j <= m; j++)
+                {
+                    int cost = char.ToLowerInvariant(a[i - 1]) == char.ToLowerInvariant(b[j - 1]) ? 0 : 1;
+                    int v = prev[j] + 1;
+                    int ins = curr[j - 1] + 1;
+                    if (ins < v) v = ins;
+                    int sub = prev[j - 1] + cost;
+                    if (sub < v) v = sub;
+                    curr[j] = v;
+                    if (v < rowMin) rowMin = v;
+                }
+                if (rowMin > cap) return cap + 1;
+                Span<int> tmp = prev;
+                prev = curr;
+                curr = tmp;
+            }
+            return prev[m];
+        }
+
+        private static void AddRanked(List<string> result, List<string> bucket, int max)
+        {
+            bucket.Sort(StringComparer.Ordinal);
+            foreach (var candidate in bucket)
+            {
+                if (result.Count >= max) return;
+                result.Add(candidate);
+            }
+        }
+
+        private static string AvailableSuffix(Dictionary<string, Dictionary<string, object>> all)
+        {
+            if (all.Count == 0) return string.Empty;
+            var langs = new List<string>(all.Keys);
+            langs.Sort(StringComparer.OrdinalIgnoreCase);
+            return $" Available: {string.Join(", ", langs)}.";
         }
 
         internal static object CloneValue(object value)

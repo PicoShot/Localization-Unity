@@ -184,7 +184,7 @@ namespace PicoShot.Localization.Editor.Mcp
                         string key = McpJson.RequireString(args, "key");
                         var entry = store.GetKey(key);
                         if (entry == null)
-                            return Fail($"Unknown key '{key}'.");
+                            return Fail(UnknownKeyError(store, key));
                         var outDict = new Dictionary<string, object>(StringComparer.Ordinal);
                         foreach (var kvp in entry) outDict[kvp.Key] = ToWire(kvp.Value);
                         return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
@@ -255,7 +255,7 @@ namespace PicoShot.Localization.Editor.Mcp
                         try
                         {
                             if (!store.RenameKey(oldKey, newKey))
-                                return Fail($"Unknown key '{oldKey}'.");
+                                return Fail(UnknownKeyError(store, oldKey));
                         }
                         catch (InvalidOperationException ex)
                         {
@@ -273,7 +273,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     {
                         string key = McpJson.RequireString(args, "key");
                         if (!store.DeleteKey(key))
-                            return Fail($"Unknown key '{key}'.");
+                            return Fail(UnknownKeyError(store, key));
                         return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
                         {
                             ["ok"] = true,
@@ -305,7 +305,7 @@ namespace PicoShot.Localization.Editor.Mcp
                         try
                         {
                             if (!store.RemoveLanguage(lang))
-                                return Fail($"Unknown language '{lang}'.");
+                                return Fail($"Unknown language '{lang}'. Available: {string.Join(", ", store.ListLanguages())}.");
                         }
                         catch (InvalidOperationException ex)
                         {
@@ -333,6 +333,13 @@ namespace PicoShot.Localization.Editor.Mcp
 
         private static (bool, object) Fail(string message) => (true,
             new Dictionary<string, object>(StringComparer.Ordinal) { ["error"] = message });
+
+        private static string UnknownKeyError(McpLocalesStore store, string key)
+        {
+            var suggestions = store.SuggestSimilarKeys(key);
+            string hint = suggestions.Count > 0 ? $" Did you mean: {string.Join(", ", suggestions)}?" : string.Empty;
+            return $"Unknown key '{key}'. Use add_key first.{hint}";
+        }
 
         private static object ToWire(object value)
         {
