@@ -88,7 +88,8 @@ Use `Tools > Localization > MCP Server > Copy Agent Config` for a paste-ready sn
 | ------------------ | ---------------------------------------------------------------------------------- |
 | `list_languages`   | All language codes + project default.                                              |
 | `list_keys`        | Keys with `search`, `view`, `limit`, `offset` pagination.                          |
-| `get_key`          | All translations for one key (`lang` → text or array).                             |
+| `get_key`          | Translations for one key, optional `langs` filter. Prefer `get_language` for bulk. |
+| `get_language`     | Whole language at once (`key` → text or array). One call per dump.                 |
 | `set_translation`  | Set one key in one language (string or string array).                              |
 | `add_key`          | New key across all languages (`type`, `defaultText`, `defaultLang`).               |
 | `rename_key`       | Rename a key, preserving translations.                                             |

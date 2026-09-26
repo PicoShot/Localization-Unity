@@ -26,8 +26,12 @@ namespace PicoShot.Localization.Editor.Mcp
                         Prop("view", "string", "View prefix, e.g. 'ui' matches 'ui.play_button'."),
                         Prop("limit", "integer", "Max keys to return."),
                         Prop("offset", "integer", "Keys to skip for pagination."))),
-                Tool("get_key", "Get all translations for one key, as language -> text (or array of texts).",
-                    Props(Prop("key", "string", "Translation key.", true))),
+                Tool("get_key", "Get translations for one key, as language -> text (or array of texts).",
+                    Props(
+                        Prop("key", "string", "Translation key.", true),
+                        Prop("langs", "array", "Only these languages (default: all).", false, StringItems()))),
+                Tool("get_language", "Read a whole language at once, as key -> text (or array of texts).",
+                    Props(Prop("lang", "string", "Language code.", true))),
                 Tool("set_translation", "Set the translation of a key in one language. Value may be a string or an array of strings.",
                     Props(
                         Prop("key", "string", "Translation key.", true),
@@ -185,12 +189,46 @@ namespace PicoShot.Localization.Editor.Mcp
                         var entry = store.GetKey(key);
                         if (entry == null)
                             return Fail(UnknownKeyError(store, key));
+                        var wanted = RequestedLanguages(args, store);
+                        if (wanted == null)
+                            return Fail(UnknownLanguageError(store, RequestedLanguageNames(args)));
                         var outDict = new Dictionary<string, object>(StringComparer.Ordinal);
-                        foreach (var kvp in entry) outDict[kvp.Key] = ToWire(kvp.Value);
+                        foreach (var kvp in entry)
+                        {
+                            if (wanted.Count > 0 && !wanted.Contains(kvp.Key))
+                                continue;
+                            outDict[kvp.Key] = ToWire(kvp.Value);
+                        }
                         return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
                         {
                             ["key"] = key,
                             ["translations"] = outDict,
+                        });
+                    }
+
+                case "get_language":
+                    {
+                        string lang = McpJson.RequireString(args, "lang");
+                        var all = store.LoadAll();
+                        string actual = null;
+                        foreach (var existing in all.Keys)
+                        {
+                            if (string.Equals(existing, lang, StringComparison.OrdinalIgnoreCase))
+                            {
+                                actual = existing;
+                                break;
+                            }
+                        }
+                        if (actual == null)
+                            return Fail(UnknownLanguageError(store, "'" + lang + "'"));
+                        var wire = new Dictionary<string, object>(StringComparer.Ordinal);
+                        foreach (var kvp in all[actual])
+                            wire[kvp.Key] = ToWire(kvp.Value);
+                        return Ok(new Dictionary<string, object>(StringComparer.Ordinal)
+                        {
+                            ["lang"] = actual,
+                            ["count"] = (long)wire.Count,
+                            ["translations"] = wire,
                         });
                     }
 
@@ -305,7 +343,7 @@ namespace PicoShot.Localization.Editor.Mcp
                         try
                         {
                             if (!store.RemoveLanguage(lang))
-                                return Fail($"Unknown language '{lang}'. Available: {string.Join(", ", store.ListLanguages())}.");
+                                return Fail(UnknownLanguageError(store, "'" + lang + "'"));
                         }
                         catch (InvalidOperationException ex)
                         {
@@ -339,6 +377,45 @@ namespace PicoShot.Localization.Editor.Mcp
             var suggestions = store.SuggestSimilarKeys(key);
             string hint = suggestions.Count > 0 ? $" Did you mean: {string.Join(", ", suggestions)}?" : string.Empty;
             return $"Unknown key '{key}'. Use add_key first.{hint}";
+        }
+
+        private static HashSet<string> RequestedLanguages(Dictionary<string, object> args, McpLocalesStore store)
+        {
+            var raw = McpJson.GetArray(args, "langs");
+            var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (raw == null) return wanted;
+            var all = store.LoadAll();
+            foreach (object item in raw)
+            {
+                if (!(item is string s)) return null;
+                string actual = null;
+                foreach (var existing in all.Keys)
+                {
+                    if (string.Equals(existing, s, StringComparison.OrdinalIgnoreCase))
+                    {
+                        actual = existing;
+                        break;
+                    }
+                }
+                if (actual == null) return null;
+                wanted.Add(actual);
+            }
+            return wanted;
+        }
+
+        private static string RequestedLanguageNames(Dictionary<string, object> args)
+        {
+            var raw = McpJson.GetArray(args, "langs");
+            if (raw == null) return string.Empty;
+            var names = new List<string>(raw.Count);
+            foreach (object item in raw)
+                names.Add(item is string s ? s : "?");
+            return "'" + string.Join(", ", names) + "'";
+        }
+
+        private static string UnknownLanguageError(McpLocalesStore store, string what)
+        {
+            return $"Unknown language {what}. Available: {string.Join(", ", store.ListLanguages())}.";
         }
 
         private static object ToWire(object value)

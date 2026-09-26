@@ -427,7 +427,7 @@ namespace PicoShot.Localization.Editor.Mcp
                 {
                     var wired = new List<object>(list.Count);
                     foreach (string s in list)
-                        wired.Add((object)(s ?? string.Empty));
+                        wired.Add(s ?? string.Empty);
                     wire[kvp.Key] = wired;
                 }
                 else

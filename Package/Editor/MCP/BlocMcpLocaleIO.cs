@@ -104,13 +104,5 @@ namespace PicoShot.Localization.Editor.Mcp
         {
             return LanguageDefinitions.IsValidLanguage(languageCode);
         }
-
-        /// <summary>Lists language codes found on disk (validated). Used for diagnostics.</summary>
-        public List<string> ScanLanguages()
-        {
-            var list = new List<string>(LoadAll().Keys);
-            list.Sort(StringComparer.OrdinalIgnoreCase);
-            return list;
-        }
     }
 }
