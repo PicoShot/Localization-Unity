@@ -27,21 +27,13 @@ A lightweight, zero-runtime-dependency, high-performance localization system for
 - **Inline Key Initialization** - Set default language values immediately when creating new keys in the Editor
 - **Optional Typed Keys** - Generate hash-backed `StringKeys` and `ArrayKeys` enums for faster, compile-time-safe lookups
 
-## Localization App
-
-I also developed a separate localization management app built with modern web technologies (**React + Vite + Tauri**) to make working with translations much easier than using the default Unity UI.
-It provides a cleaner interface for managing, editing, and translating localization data, which significantly speeds up the workflow.
-I highly recommend using this app when working with the localization system.
-
-Repository: [Localization-UI](https://github.com/PicoShot/Localization-UI)
-
 ## Quick Start
 
 ### 1. Installation
 
 Add the package via Unity Package Manager:
 
-```
+```link
 https://github.com/PicoShot/Localization-Unity.git?path=/Package
 ```
 
