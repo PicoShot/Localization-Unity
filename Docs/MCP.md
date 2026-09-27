@@ -126,7 +126,11 @@ Key rules are the same as in the editor: keys are unique case-insensitively, arr
 
 ## Agent skill
 
-The repo ships a skill file (`.agents/skills/picoshot-localization/SKILL.md`) that teaches agents these tools and the efficient flows above (bulk reads/writes, gap-driven translation, parallel safety).
+The repo ships a skill file (`.agents/skills/picoshot-localization/SKILL.md`) that teaches agents these tools and the efficient flows above (bulk reads/writes, gap-driven translation, parallel safety). To install it to your project, run:
+
+```bash
+npx skills add PicoShot/Localization-Unity
+```
 
 ## Security notes
 
