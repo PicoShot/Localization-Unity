@@ -44,10 +44,22 @@ The port is stored in EditorPrefs (default `8123`) and editable in the MCP setti
 
 All clients use the same URL: `http://127.0.0.1:8123/mcp`.
 
-**Claude Code CLI**
+### Claude Code CLI
 
-```
+```bash
 claude mcp add --transport http picoshot-localization http://127.0.0.1:8123/mcp
+```
+
+### Codex CLI
+
+```bash
+codex mcp add picoshot-localization --url http://127.0.0.1:8123/mcp
+```
+
+### opencode CLI
+
+```bash
+opencode mcp add picoshot-localization --url http://127.0.0.1:8123/mcp
 ```
 
 **Cursor** (`.cursor/mcp.json` in the project)
@@ -70,12 +82,21 @@ claude mcp add --transport http picoshot-localization http://127.0.0.1:8123/mcp
 }
 ```
 
-**Claude Desktop** (`claude_desktop_config.json`)
+**Claude Desktop** (`claude_desktop_config.json`) claude desktop requires nodejs (with npx) installed.
 
 ```json
 {
   "mcpServers": {
-    "picoshot-localization": { "url": "http://127.0.0.1:8123/mcp" }
+    "picoshot-localization": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote",
+        "http://127.0.0.1:8123/mcp",
+        "--transport",
+        "http-only"
+      ]
+    }
   }
 }
 ```
@@ -91,17 +112,21 @@ Use `Tools > Localization > MCP Server > Copy Agent Config` for a paste-ready sn
 | `get_key`          | Translations for one key, optional `langs` filter. Prefer `get_language` for bulk. |
 | `get_language`     | Whole language at once (`key` → text or array). One call per dump.                 |
 | `set_translation`  | Set one key in one language (string or string array).                              |
+| `set_translations` | Set up to 500 translations in one call (`[{key, lang, value}]`, per-item results). |
 | `add_key`          | New key across all languages (`type`, `defaultText`, `defaultLang`).               |
 | `rename_key`       | Rename a key, preserving translations.                                             |
 | `delete_key`       | Delete a key everywhere.                                                           |
 | `add_language`     | Add a language (empty cells, array shapes mirrored).                               |
 | `remove_language`  | Remove a language and its file.                                                    |
-| `set_translations` | Set up to 500 translations in one call (`[{key, lang, value}]`, per-item results). |
 | `validate`         | Report corrupt files, coverage gaps and empty cells.                               |
 
 Resources: every language is also readable as `locales://{lang}` (JSON).
 
 Key rules are the same as in the editor: keys are unique case-insensitively, array keys keep equal length across languages, filenames must match the language code in the file header.
+
+## Agent skill
+
+The repo ships a skill file (`.agents/skills/picoshot-localization/SKILL.md`) that teaches agents these tools and the efficient flows above (bulk reads/writes, gap-driven translation, parallel safety).
 
 ## Security notes
 
