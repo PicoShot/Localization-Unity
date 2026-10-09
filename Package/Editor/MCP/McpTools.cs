@@ -143,7 +143,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     Prop("lang", "string", "Language code.", true)),
                 Tool("validate", "Validate",
                     "Health check: unreadable locale files, keys missing from some languages, string/array type conflicts, array length " +
-                    "mismatches and empty-cell counts per language. Pass 'lang' to also list that language's empty keys. 'ok' is true " +
+                    "mismatches, placeholders or rich-text tags that differ from the default language, and empty-cell counts per language. Pass 'lang' to also list that language's empty keys. 'ok' is true " +
                     "when nothing needs fixing besides empty cells.",
                     ReadOnly,
                     Prop("lang", "string", "Also list the empty keys of this language."),
@@ -589,6 +589,9 @@ namespace PicoShot.Localization.Editor.Mcp
             var typeConflicts = new BoundedList(limit);
             var lengthMismatches = new BoundedList(limit);
             var caseConflicts = new BoundedList(limit);
+            var formatMismatches = new BoundedList(limit);
+            string sourceLang = snap.ResolveLanguage(store.DefaultLanguage);
+            var sourceData = sourceLang != null ? snap.GetLanguage(sourceLang) : null;
             var seenIgnoreCase = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var languages = snap.Languages;
 
@@ -629,6 +632,9 @@ namespace PicoShot.Localization.Editor.Mcp
                     typeConflicts.Add(Obj("key", key, "string", stringLangs, "array", arrayLangs));
                 if (lengthMismatch)
                     lengthMismatches.Add(Obj("key", key, "lengths", lengths));
+
+                if (sourceData != null && sourceData.TryGetValue(key, out object sourceValue))
+                    CheckFormat(key, sourceLang, sourceValue, snap, formatMismatches);
             }
 
             var emptyByLanguage = new Dictionary<string, object>(StringComparer.Ordinal);
@@ -636,7 +642,7 @@ namespace PicoShot.Localization.Editor.Mcp
                 emptyByLanguage[lang] = (long)snap.CountEmpty(lang);
 
             bool ok = snap.FileIssues.Count == 0 && missing.Total == 0 && typeConflicts.Total == 0 &&
-                      lengthMismatches.Total == 0 && caseConflicts.Total == 0;
+                      lengthMismatches.Total == 0 && caseConflicts.Total == 0 && formatMismatches.Total == 0;
             var result = new Dictionary<string, object>(StringComparer.Ordinal)
             {
                 ["ok"] = ok,
@@ -649,6 +655,7 @@ namespace PicoShot.Localization.Editor.Mcp
             typeConflicts.WriteTo(result, "typeConflicts");
             lengthMismatches.WriteTo(result, "arrayLengthMismatches");
             caseConflicts.WriteTo(result, "caseConflicts");
+            formatMismatches.WriteTo(result, "formatMismatches");
 
             if (emptyLang != null)
             {
@@ -663,6 +670,36 @@ namespace PicoShot.Localization.Editor.Mcp
                 emptyKeys.WriteTo(result, "emptyKeys", always: true);
             }
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Reports translations whose placeholders or rich-text tags differ from the source language.
+        /// Array items are compared by index.
+        /// </summary>
+        private static void CheckFormat(string key, string sourceLang, object sourceValue, McpLocaleSnapshot snap, BoundedList mismatches)
+        {
+            foreach (string lang in snap.Languages)
+            {
+                if (lang == sourceLang || !snap.GetLanguage(lang).TryGetValue(key, out object value))
+                    continue;
+
+                if (sourceValue is string sourceText && value is string text)
+                {
+                    string problem = McpTextChecks.FindMismatch(sourceText, text);
+                    if (problem != null)
+                        mismatches.Add(Obj("key", key, "lang", lang, "problem", problem));
+                }
+                else if (sourceValue is List<string> sourceItems && value is List<string> items)
+                {
+                    int count = Math.Min(sourceItems.Count, items.Count);
+                    for (int i = 0; i < count; i++)
+                    {
+                        string problem = McpTextChecks.FindMismatch(sourceItems[i], items[i]);
+                        if (problem != null)
+                            mismatches.Add(Obj("key", key, "lang", lang, "index", (long)i, "problem", problem));
+                    }
+                }
+            }
         }
 
         private static List<object> FileIssues(McpLocaleSnapshot snap)

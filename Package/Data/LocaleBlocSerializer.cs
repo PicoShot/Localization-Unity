@@ -76,7 +76,7 @@ namespace PicoShot.Localization.Data
         }
 
         /// <summary>
-        /// Validates a BLOC file by checking magic, version, and CRC32 checksum.
+        /// Validates a BLOC file by checking magic, version, checksums and structure.
         /// Returns true if the file is valid and not corrupted.
         /// </summary>
         public static bool ValidateFile(string path, out ushort version, out string languageCode)

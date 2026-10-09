@@ -121,7 +121,7 @@ Use `Tools > Localization > MCP Server > Copy Agent Config` for a paste-ready sn
 | `delete_key(s)`    | Delete one key / up to 500 keys everywhere.                                                                  |
 | `add_language`     | Add a language (empty cells, array lengths mirrored).                                                        |
 | `remove_language`  | Remove a language and its file (refuses the default and the last language).                                  |
-| `validate`         | Unreadable files, missing keys, string/array conflicts, array length mismatches, empty counts per language. |
+| `validate`         | Unreadable files, missing keys, string/array conflicts, array length mismatches, placeholders or rich-text tags that differ from the default language, empty counts per language. |
 
 Resources: every language is also readable as `locales://{lang}` (JSON).
 

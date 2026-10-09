@@ -371,42 +371,43 @@ namespace PicoShot.Localization
                 string tempFile = $"{file}.tmp";
                 try
                 {
-                    using var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read);
-
-                    if (!BlocFormat.Validate(stream, out var version, out var langCode, out var exception) || string.IsNullOrEmpty(langCode))
+                    using (var stream = new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
                     {
-                        Debug.LogWarning($"[LocalizationEditor] Skipping invalid/corrupted file: {Path.GetFileName(file)}");
+                        if (!BlocFormat.Validate(stream, out var version, out var langCode, out var exception) || string.IsNullOrEmpty(langCode))
+                        {
+                            Debug.LogWarning($"[LocalizationEditor] Skipping invalid/corrupted file: {Path.GetFileName(file)}");
 
-                        if (exception != null)
-                            Debug.Log($"BLOC validation error: {exception}");
+                            if (exception != null)
+                                Debug.Log($"BLOC validation error: {exception}");
 
-                        continue;
-                    }
-                    stream.Position = 0;
+                            continue;
+                        }
+                        stream.Position = 0;
 
-                    if (!LanguageDefinitions.IsValidLanguage(langCode))
-                    {
-                        Debug.LogError($"[LocalizationEditor] Rejecting file '{Path.GetFileName(file)}' - unsupported language code: '{langCode}'");
-                        continue;
-                    }
+                        if (!LanguageDefinitions.IsValidLanguage(langCode))
+                        {
+                            Debug.LogError($"[LocalizationEditor] Rejecting file '{Path.GetFileName(file)}' - unsupported language code: '{langCode}'");
+                            continue;
+                        }
 
-                    string fileNameLanguage = Path.GetFileNameWithoutExtension(file);
-                    if (!string.Equals(fileNameLanguage, langCode, StringComparison.OrdinalIgnoreCase))
-                    {
-                        Debug.LogError($"[LocalizationEditor] Rejecting file '{Path.GetFileName(file)}' - filename mismatch: " +
-                            $"expected '{langCode}.bloc' but filename is '{Path.GetFileName(file)}'. " +
-                            $"Filename must match the language code stored in the file header.");
-                        continue;
-                    }
+                        string fileNameLanguage = Path.GetFileNameWithoutExtension(file);
+                        if (!string.Equals(fileNameLanguage, langCode, StringComparison.OrdinalIgnoreCase))
+                        {
+                            Debug.LogError($"[LocalizationEditor] Rejecting file '{Path.GetFileName(file)}' - filename mismatch: " +
+                                $"expected '{langCode}.bloc' but filename is '{Path.GetFileName(file)}'. " +
+                                $"Filename must match the language code stored in the file header.");
+                            continue;
+                        }
 
-                    if (version >= BlocFormat.LatestVersion)
-                        continue;
+                        if (version >= BlocFormat.LatestVersion)
+                            continue;
 
-                    using (var destStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
-                    {
-                        BlocFormat.Upgrade(stream, destStream, BlocFormat.LatestVersion, LocaleBlocSerializer.CompressionLevel);
+                        using (var destStream = new FileStream(tempFile, FileMode.Create, FileAccess.Write, FileShare.None))
+                        {
+                            BlocFormat.Upgrade(stream, destStream, BlocFormat.LatestVersion, LocaleBlocSerializer.CompressionLevel);
 
-                        destStream.Flush(true);
+                            destStream.Flush(true);
+                        }
                     }
 
                     if (File.Exists(file))

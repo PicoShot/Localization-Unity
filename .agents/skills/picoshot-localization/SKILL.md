@@ -34,7 +34,7 @@ Read (safe):
 - `get_keys`: up to 500 keys, as key → {lang: value}.
 - `get_language`: one language, filtered by `view`/`search`/`keys`/`emptyOnly`, paged.
 - `get_untranslated`: the translation work list, as key → source text.
-- `validate`: unreadable files, missing keys, type and array-length conflicts, empty counts. Add `lang` to list that language's empty keys.
+- `validate`: unreadable files, missing keys, type and array-length conflicts, placeholder or rich-text tag mismatches against the default language (`formatMismatches`), empty counts. Add `lang` to list that language's empty keys.
 
 Write:
 - `set_translations`: `{lang, values: {key: value}}` and/or `translations: [{key, lang, value}]`, ≤500 cells. Cells that already hold the value are skipped.

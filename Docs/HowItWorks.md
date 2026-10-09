@@ -83,38 +83,33 @@ SetLanguage(DetectSystemLanguage())
 | JSON   | 100%   | Slow (parse)  | High   |
 | BLOC   | 30-50% | Fast (binary) | Low    |
 
-BLOC uses:
+BLOC (version 3) uses:
 
-- **String Pool**: Deduplicates repeated text
-- **Integer IDs**: References strings by index
-- **Direct Access**: No parsing needed
-- **Optional Compression**: Deflate for smaller files
+- **Front-coded keys**: sorted key names store only what differs from the previous key
+- **Shared texts**: a repeated text is stored once and referenced with one or two bytes
+- **Per-file text encoding**: UTF-8, UTF-16 for CJK, or one byte per letter for alphabets like Cyrillic or Arabic
+- **Lazy values**: texts stay encoded until first read
+- **Checksums**: a damaged or truncated file is refused instead of loaded
+- **Optional compression**: Deflate for smaller files
 
 ### File Structure
 
 ```
 ┌─────────────────────────────────────────┐
-│ Header (24 bytes)                       │
-│ - Magic: "BLOC"                         │
-│ - Version: 1                            │
-│ - Flags: Compression                    │
-│ - Language Code: "en"                   │
-│ - Entry Count                           │
-│ - String Count                          │
-│ - String Pool Offset                    │
+│ Header (48 bytes)                       │
+│ - Magic "BLOC", version 3               │
+│ - Language code, entry count            │
+│ - Key set id, text encoding             │
+│ - Header checksum                       │
 ├─────────────────────────────────────────┤
-│ Entry Table                             │
-│ - Key ID (4 bytes)                      │
-│ - Value ID (4 bytes)                    │
-│   OR Array Header (4 bytes)             │
-│   + Item IDs (4 bytes each)             │
+│ Section directory (20 bytes each)       │
+│ - Tag, codec, sizes, checksum           │
 ├─────────────────────────────────────────┤
-│ String Pool (UTF-8)                     │
-│ - Variable-length strings               │
-│ - Length-prefixed                       │
-├─────────────────────────────────────────┤
-│ Footer (4 bytes)                        │
-│ - CRC32 Checksum                        │
+│ DATA section (Deflate or stored)        │
+│ - ENTRIES: one varint per key           │
+│ - LENGTHS: one varint per unique text   │
+│ - TEXT:    unique texts                 │
+│ - KEYS:    sorted, front-coded names    │
 └─────────────────────────────────────────┘
 ```
 
@@ -132,7 +127,7 @@ string text = LocalizationManager.GetText("greeting");
 
 ```
 GetText("greeting")
-    └─► Check _currentLanguageData dictionary (O(1))
+    └─► Check _currentLanguageData (O(1) hash lookup)
     │   └─► Found? Return value
     │
     └─► Check _fallbackLanguageData (if different)

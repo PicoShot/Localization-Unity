@@ -23,10 +23,11 @@ namespace PicoShot.Localization.Bloc
             Versions = new BlocFormatLayout[]
             {
                 BlocFormat1.FormatLayout,
-                BlocFormat2.FormatLayout
+                BlocFormat2.FormatLayout,
+                BlocFormat3.FormatLayout
             };
 
-            LatestVersion = 2;
+            LatestVersion = BlocFormat3.VERSION;
         }
 
         public static void Serialize(LocaleData localeData, Stream stream, CompressionLevel compressionLevel)
@@ -41,37 +42,42 @@ namespace PicoShot.Localization.Bloc
             writer.Write(MAGIC);
             writer.Write(formatLayout.version);
 
-            var entries = new IBlocEntry[localeData.Translations.Count];
-            int i = 0;
+            bool supportsV3Entries = formatLayout.version >= BlocFormat3.VERSION;
+            var entries = new List<IBlocEntry>(localeData.Translations.Count);
             foreach (var translation in localeData.Translations)
             {
                 if (translation.Key == null)
                     continue;
 
-                ref var entry = ref entries[i++];
-
                 switch (translation.Value)
                 {
+                    case null:
+                        // No translation: v3 stores it so lookups fall back; older versions just omit the key.
+                        if (supportsV3Entries)
+                            entries.Add(new MissingEntry() { Key = translation.Key });
+                        break;
+                    case PluralValue plural:
+                        if (!supportsV3Entries)
+                            throw new NotSupportedException($"Key '{translation.Key}': plural values need BLOC version {BlocFormat3.VERSION} or later.");
+
+                        entries.Add(new PluralEntry() { Key = translation.Key, Value = plural });
+                        break;
+                    case string value:
+                        entries.Add(new StringEntry() { Key = translation.Key, Value = value });
+                        break;
                     case IEnumerable<string> values:
-                        entry = new ArrayEntry()
+                        entries.Add(new ArrayEntry()
                         {
                             Key = translation.Key,
                             Values = values.Select(v => v ?? string.Empty).ToArray()
-                        };
-                        break;
-                    case string value:
-                        entry = new StringEntry()
-                        {
-                            Key = translation.Key,
-                            Value = value ?? string.Empty
-                        };
+                        });
                         break;
                     default:
-                        throw new NotImplementedException();
+                        throw new NotSupportedException($"Key '{translation.Key}': unsupported value type '{translation.Value.GetType().Name}'.");
                 }
             }
 
-            formatLayout.serializer(writer, entries, localeData.LanguageCode, compressionLevel);
+            formatLayout.serializer(writer, entries.ToArray(), localeData.LanguageCode, compressionLevel);
         }
 
         public static IBlocEntry[] DeserializeEntries(Stream stream, out BlocInfo info)
@@ -113,6 +119,12 @@ namespace PicoShot.Localization.Bloc
                         break;
                     case ArrayEntry ae:
                         translations.Add(ae.Key, ae.Values.ToList());
+                        break;
+                    case PluralEntry pe:
+                        translations.Add(pe.Key, pe.Value);
+                        break;
+                    case MissingEntry _:
+                        // Untranslated: the key is simply absent from this language, as in v1/v2.
                         break;
                     default:
                         throw new NotImplementedException();
@@ -382,5 +394,23 @@ namespace PicoShot.Localization.Bloc
     {
         public string Key { get; set; }
         public string[] Values;
+    }
+
+    /// <summary>
+    /// A key with no translation in this language: lookups fall back to the default language.
+    /// Unlike an empty string, which is shown as empty. BLOC v3 and later.
+    /// </summary>
+    public struct MissingEntry : IBlocEntry
+    {
+        public string Key { get; set; }
+    }
+
+    /// <summary>
+    /// A translation with one text per plural category. BLOC v3 and later.
+    /// </summary>
+    public struct PluralEntry : IBlocEntry
+    {
+        public string Key { get; set; }
+        public PluralValue Value;
     }
 }

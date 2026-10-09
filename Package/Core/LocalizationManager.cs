@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
-using PicoShot.Localization.Bloc;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
 using PicoShot.Localization.Hashing;
@@ -529,8 +528,8 @@ namespace PicoShot.Localization
                 }
             }
 
-            using var stream = new MemoryStream(bytes, writable: false);
-            return new LanguageDictionary(BlocFormat.DeserializeEntries(stream, out _));
+            // Languages with the same keys as the default language share its key index.
+            return LanguageDictionary.Load(bytes, _defaultLanguageData);
         }
 
         private static string GetLocaleFilePath(string languageCode)

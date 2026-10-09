@@ -117,10 +117,14 @@ The text is handled automatically, but you may want to adjust UI layout (anchors
 
 Yes! BLOC format offers:
 
-- **50-70% smaller** file sizes
-- **O(1) lookups** - direct access, no parsing
-- **String deduplication** - reduces memory usage
+- **Much smaller files** - version 3 is about 25% smaller than version 2, which was already 50-70% smaller than JSON
+- **Fast loading** - texts stay encoded until first used, so loading a language does almost no work
+- **O(1) lookups** - a hash table on the key hash
+- **String deduplication** - a repeated text is stored once
+- **Checksums** - damaged files are detected and refused
 - **Optional compression** - even smaller files
+
+See [BLOC_FORMAT.md](BLOC_FORMAT.md) for the measurements.
 
 ### How much memory does it use?
 
