@@ -97,6 +97,7 @@ namespace PicoShot.Localization
             set
             {
                 formatParameters = value ?? Array.Empty<string>();
+                _formatArguments = null;
                 if (Application.isPlaying)
                     UpdateText();
             }
@@ -144,6 +145,8 @@ namespace PicoShot.Localization
         private Vector2 _lastWrappedRectSize = new(float.NaN, float.NaN);
         private bool _isInitialized;
         private readonly List<Func<string, string>> _textProcessors = new();
+        private Func<string, string> _boundProcessor;
+        private object[] _formatArguments;
 
         #endregion
 
@@ -307,6 +310,12 @@ namespace PicoShot.Localization
         /// </summary>
         public void SetFormatParameter(int index, string value)
         {
+            if (_formatArguments != null)
+            {
+                formatParameters = ToStringParameters(_formatArguments);
+                _formatArguments = null;
+            }
+
             if (formatParameters == null)
             {
                 formatParameters = new string[index + 1];
@@ -321,6 +330,38 @@ namespace PicoShot.Localization
                 formatParameters[index] = value;
                 UpdateText();
             }
+        }
+
+        public void SetFormatArguments(params object[] arguments)
+        {
+            _formatArguments = arguments != null && arguments.Length > 0 ? arguments : null;
+            if (Application.isPlaying)
+                UpdateText();
+        }
+
+        internal void Bind(string key, int index, int sizeLimit, Func<string, string> processor, object[] arguments)
+        {
+            translationKey = key;
+            arrayIndex = index;
+            arraySizeLimit = sizeLimit;
+            _formatArguments = arguments != null && arguments.Length > 0 ? arguments : null;
+
+            if (_boundProcessor != null)
+                _textProcessors.Remove(_boundProcessor);
+            _boundProcessor = processor;
+            if (processor != null && !_textProcessors.Contains(processor))
+                _textProcessors.Add(processor);
+
+            if (Application.isPlaying)
+                UpdateText();
+        }
+
+        private static string[] ToStringParameters(object[] arguments)
+        {
+            var result = new string[arguments.Length];
+            for (int i = 0; i < arguments.Length; i++)
+                result[i] = arguments[i]?.ToString() ?? string.Empty;
+            return result;
         }
 
         /// <summary>
@@ -614,12 +655,17 @@ namespace PicoShot.Localization
                 return LocalizationManager.GetArrayText(translationKey, arrayIndex);
             }
 
-            if (formatParameters != null && formatParameters.Length > 0)
-            {
-                return LocalizationManager.GetText(translationKey, formatParameters);
-            }
+            return LocalizationManager.GetText(translationKey, CurrentFormatArguments);
+        }
 
-            return LocalizationManager.GetText(translationKey);
+        private object[] CurrentFormatArguments
+        {
+            get
+            {
+                if (_formatArguments != null) return _formatArguments;
+                if (formatParameters != null && formatParameters.Length > 0) return formatParameters;
+                return Array.Empty<object>();
+            }
         }
 
         private string GetLogicalTranslatedText()
@@ -627,10 +673,7 @@ namespace PicoShot.Localization
             if (arrayIndex >= 0)
                 return LocalizationManager.GetLogicalArrayText(translationKey, arrayIndex);
 
-            if (formatParameters != null && formatParameters.Length > 0)
-                return LocalizationManager.GetLogicalText(translationKey, formatParameters);
-
-            return LocalizationManager.GetLogicalText(translationKey);
+            return LocalizationManager.GetLogicalText(translationKey, CurrentFormatArguments);
         }
 
         private string ApplyProcessors(string text)

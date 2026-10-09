@@ -1102,30 +1102,7 @@ namespace PicoShot.Localization
         /// <param name="args">Format parameters for the translation.</param>
         public static void BindText(TMP_Text textComponent, string key, int arrayIndex = -1, Func<string, string> textProcessor = null, params object[] args)
         {
-            if (textComponent == null)
-            {
-                Debug.LogError("[LocalizationManager] BindText called with null TMP_Text component");
-                return;
-            }
-
-            var localizedComponent = textComponent.GetComponent<LocalizationTextComponent>();
-            if (localizedComponent == null)
-            {
-                localizedComponent = textComponent.gameObject.AddComponent<LocalizationTextComponent>();
-            }
-
-            localizedComponent.TranslationKey = key;
-            localizedComponent.ArrayIndex = arrayIndex;
-
-            if (args != null && args.Length > 0)
-            {
-                localizedComponent.SetFormatParameters(args.Select(a => a?.ToString() ?? string.Empty).ToArray());
-            }
-
-            if (textProcessor != null)
-            {
-                localizedComponent.AddTextProcessor(textProcessor);
-            }
+            BindInternal(textComponent, "TMP_Text", key, arrayIndex, 0, textProcessor, args);
         }
 
         /// <summary>
@@ -1138,30 +1115,7 @@ namespace PicoShot.Localization
         /// <param name="args">Format parameters for each option (applied to all).</param>
         public static void BindText(TMP_Dropdown dropdown, string key, int arrayMaxSize = 0, Func<string, string> textProcessor = null, params object[] args)
         {
-            if (dropdown == null)
-            {
-                Debug.LogError("[LocalizationManager] BindText called with null TMP_Dropdown component");
-                return;
-            }
-
-            var localizedComponent = dropdown.GetComponent<LocalizationTextComponent>();
-            if (localizedComponent == null)
-            {
-                localizedComponent = dropdown.gameObject.AddComponent<LocalizationTextComponent>();
-            }
-
-            localizedComponent.TranslationKey = key;
-            localizedComponent.ArraySizeLimit = arrayMaxSize;
-
-            if (args != null && args.Length > 0)
-            {
-                localizedComponent.SetFormatParameters(args.Select(a => a?.ToString() ?? string.Empty).ToArray());
-            }
-
-            if (textProcessor != null)
-            {
-                localizedComponent.AddTextProcessor(textProcessor);
-            }
+            BindInternal(dropdown, "TMP_Dropdown", key, -1, arrayMaxSize, textProcessor, args);
         }
 
         /// <summary>
@@ -1174,30 +1128,7 @@ namespace PicoShot.Localization
         /// <param name="args">Format parameters for the translation.</param>
         public static void BindText(Text textComponent, string key, int arrayIndex = -1, Func<string, string> textProcessor = null, params object[] args)
         {
-            if (textComponent == null)
-            {
-                Debug.LogError("[LocalizationManager] BindText called with null Text component");
-                return;
-            }
-
-            var localizedComponent = textComponent.GetComponent<LocalizationTextComponent>();
-            if (localizedComponent == null)
-            {
-                localizedComponent = textComponent.gameObject.AddComponent<LocalizationTextComponent>();
-            }
-
-            localizedComponent.TranslationKey = key;
-            localizedComponent.ArrayIndex = arrayIndex;
-
-            if (args != null && args.Length > 0)
-            {
-                localizedComponent.SetFormatParameters(args.Select(a => a?.ToString() ?? string.Empty).ToArray());
-            }
-
-            if (textProcessor != null)
-            {
-                localizedComponent.AddTextProcessor(textProcessor);
-            }
+            BindInternal(textComponent, "Text", key, arrayIndex, 0, textProcessor, args);
         }
 
         /// <summary>
@@ -1210,30 +1141,7 @@ namespace PicoShot.Localization
         /// <param name="args">Format parameters for each option (applied to all).</param>
         public static void BindText(Dropdown dropdown, string key, int arrayMaxSize = 0, Func<string, string> textProcessor = null, params object[] args)
         {
-            if (dropdown == null)
-            {
-                Debug.LogError("[LocalizationManager] BindText called with null Dropdown component");
-                return;
-            }
-
-            var localizedComponent = dropdown.GetComponent<LocalizationTextComponent>();
-            if (localizedComponent == null)
-            {
-                localizedComponent = dropdown.gameObject.AddComponent<LocalizationTextComponent>();
-            }
-
-            localizedComponent.TranslationKey = key;
-            localizedComponent.ArraySizeLimit = arrayMaxSize;
-
-            if (args != null && args.Length > 0)
-            {
-                localizedComponent.SetFormatParameters(args.Select(a => a?.ToString() ?? string.Empty).ToArray());
-            }
-
-            if (textProcessor != null)
-            {
-                localizedComponent.AddTextProcessor(textProcessor);
-            }
+            BindInternal(dropdown, "Dropdown", key, -1, arrayMaxSize, textProcessor, args);
         }
 
         /// <summary>
@@ -1246,30 +1154,25 @@ namespace PicoShot.Localization
         /// <param name="args">Format parameters for the translation.</param>
         public static void BindText(TextMesh textMesh, string key, int arrayIndex = -1, Func<string, string> textProcessor = null, params object[] args)
         {
-            if (textMesh == null)
+            BindInternal(textMesh, "TextMesh", key, arrayIndex, 0, textProcessor, args);
+        }
+
+
+        private static void BindInternal(Component target, string componentName, string key, int arrayIndex, int arrayMaxSize,
+            Func<string, string> textProcessor, object[] args)
+        {
+            if (target == null)
             {
-                Debug.LogError("[LocalizationManager] BindText called with null TextMesh component");
+                Debug.LogError($"[LocalizationManager] BindText called with null {componentName} component");
                 return;
             }
 
-            var localizedComponent = textMesh.GetComponent<LocalizationTextComponent>();
-            if (localizedComponent == null)
+            if (!target.TryGetComponent(out LocalizationTextComponent localizedComponent))
             {
-                localizedComponent = textMesh.gameObject.AddComponent<LocalizationTextComponent>();
+                localizedComponent = target.gameObject.AddComponent<LocalizationTextComponent>();
             }
 
-            localizedComponent.TranslationKey = key;
-            localizedComponent.ArrayIndex = arrayIndex;
-
-            if (args != null && args.Length > 0)
-            {
-                localizedComponent.SetFormatParameters(args.Select(a => a?.ToString() ?? string.Empty).ToArray());
-            }
-
-            if (textProcessor != null)
-            {
-                localizedComponent.AddTextProcessor(textProcessor);
-            }
+            localizedComponent.Bind(key, arrayIndex, arrayMaxSize, textProcessor, args);
         }
 
         #endregion
