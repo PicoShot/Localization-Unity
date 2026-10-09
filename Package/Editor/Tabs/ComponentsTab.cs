@@ -5,6 +5,7 @@ using System.Text;
 using TMPro;
 using UnityEditor;
 using UnityEditor.IMGUI.Controls;
+using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
@@ -23,7 +24,8 @@ namespace PicoShot.Localization.Editor.Tabs
         private enum Mode
         {
             Selection,
-            Scene
+            Scene,
+            Prefabs
         }
 
         private enum StatusFilter
@@ -62,6 +64,9 @@ namespace PicoShot.Localization.Editor.Tabs
             public string Path;
             public string Scene;
 
+            public GameObject PrefabRoot;
+            public string InnerPath;
+
             public RowState State;
             public string Detail;
             public string Preview;
@@ -85,7 +90,7 @@ namespace PicoShot.Localization.Editor.Tabs
         private const float MenuWidth = 20f;
         private const int MaxPlanLines = 12;
 
-        private static readonly string[] ModeLabels = { "Selection", "Scene" };
+        private static readonly string[] ModeLabels = { "Selection", "Scene", "Prefabs" };
 
         private static readonly HashSet<string> GenericObjectNames = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -113,6 +118,12 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private bool _subscribed;
         private GUIStyle _lockStyle;
+
+        // Prefab scan results; kept until the next scan
+        private readonly List<Row> _prefabRows = new();
+        private DateTime? _prefabScanTime;
+        private int _prefabsScanned;
+        private int _prefabsWithText;
 
         public ComponentsTab(LocalizationEditor editor, LanguageEditorData data) : base(editor, data) { }
 
@@ -231,11 +242,11 @@ namespace PicoShot.Localization.Editor.Tabs
 
             EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             {
-                int mode = GUILayout.Toolbar((int)_mode, ModeLabels, EditorStyles.toolbarButton, GUILayout.Width(140));
+                int mode = GUILayout.Toolbar((int)_mode, ModeLabels, EditorStyles.toolbarButton, GUILayout.Width(210));
                 if (mode != (int)_mode)
                 {
                     _mode = (Mode)mode;
-                    if (_mode == Mode.Scene && _statusFilter == StatusFilter.NotLocalized)
+                    if (_mode != Mode.Selection && _statusFilter == StatusFilter.NotLocalized)
                         _statusFilter = StatusFilter.All;
                     _rowsDirty = true;
                     _scroll = Vector2.zero;
@@ -260,6 +271,15 @@ namespace PicoShot.Localization.Editor.Tabs
                 {
                     if (GUILayout.Button(new GUIContent("Refresh", "Rescan open scenes"), EditorStyles.toolbarButton, GUILayout.Width(56)))
                         _rowsDirty = true;
+                }
+                else if (_mode == Mode.Prefabs)
+                {
+                    var scanContent = new GUIContent(_prefabScanTime == null ? "Scan" : "Rescan", "Scan every prefab under Assets");
+                    if (GUILayout.Button(scanContent, EditorStyles.toolbarButton, GUILayout.Width(56)))
+                    {
+                        ScanPrefabs();
+                        GUIUtility.ExitGUI();
+                    }
                 }
                 else
                 {
@@ -347,15 +367,24 @@ namespace PicoShot.Localization.Editor.Tabs
                 parts.Add(_rows.Count == 1 ? "1 text component" : $"{_rows.Count} text components");
                 parts.Add($"{localized} localized");
             }
-            else
+            else if (_mode == Mode.Scene)
             {
                 int scenes = SceneManager.sceneCount;
                 title = scenes == 1 ? "Open scene" : $"{scenes} open scenes";
                 parts.Add(localized == 1 ? "1 localized component" : $"{localized} localized components");
             }
+            else
+            {
+                if (_prefabScanTime == null)
+                    return;
+                title = "Project prefabs";
+                parts.Add($"{localized} localized {(localized == 1 ? "component" : "components")} in {_prefabsWithText} of {_prefabsScanned} prefabs");
+            }
 
             if (broken > 0) parts.Add($"{broken} broken");
             if (untranslated > 0) parts.Add($"{untranslated} untranslated");
+            if (_mode == Mode.Prefabs && _prefabScanTime.HasValue)
+                parts.Add($"scanned {FormatAge(DateTime.Now - _prefabScanTime.Value)}");
 
             var rect = GUILayoutUtility.GetRect(0f, 22f, GUILayout.ExpandWidth(true));
             var titleContent = new GUIContent(title);
@@ -369,6 +398,25 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             string title = null, message = null;
 
+            if (_mode == Mode.Prefabs && _prefabScanTime == null)
+            {
+                GUILayout.FlexibleSpace();
+                GUILayout.Label("Scan project prefabs", Styles.CenteredTitle);
+                GUILayout.Label("Finds localized text in every prefab under Assets, including broken keys in prefabs nobody has open. " +
+                                "Prefabs are loaded only when you scan.", Styles.EmptyState);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("Scan Prefabs", GUILayout.Width(120), GUILayout.Height(24)))
+                {
+                    ScanPrefabs();
+                    GUIUtility.ExitGUI();
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                GUILayout.FlexibleSpace();
+                return true;
+            }
+
             if (_mode == Mode.Selection && Data.SelectedGameObject == null)
             {
                 title = "Nothing selected";
@@ -377,9 +425,12 @@ namespace PicoShot.Localization.Editor.Tabs
             else if (_rows.Count == 0)
             {
                 title = _mode == Mode.Selection ? "No text components" : "No localized components";
-                message = _mode == Mode.Selection
-                    ? "Supported: TextMesh Pro text and dropdowns, legacy UI Text and Dropdown, and 3D TextMesh."
-                    : "Localize text in Selection mode, then audit it here.";
+                message = _mode switch
+                {
+                    Mode.Selection => "Supported: TextMesh Pro text and dropdowns, legacy UI Text and Dropdown, and 3D TextMesh.",
+                    Mode.Scene => "Localize text in Selection mode, then audit it here.",
+                    _ => $"None of the {_prefabsScanned} prefabs under Assets use localized text."
+                };
             }
             else if (visible.Count == 0)
             {
@@ -432,8 +483,10 @@ namespace PicoShot.Localization.Editor.Tabs
 
             if (_mode == Mode.Selection)
                 CollectSelectionRows();
-            else
+            else if (_mode == Mode.Scene)
                 CollectSceneRows();
+            else
+                _rows.AddRange(_prefabRows.Where(r => r.GameObject != null));
         }
 
         private void CollectSelectionRows()
@@ -814,9 +867,18 @@ namespace PicoShot.Localization.Editor.Tabs
                 !layout.Key.Contains(evt.mousePosition) && !layout.Status.Contains(evt.mousePosition) && !layout.Menu.Contains(evt.mousePosition))
             {
                 _highlighted = row.GameObject;
-                EditorGUIUtility.PingObject(row.GameObject);
-                if (_mode == Mode.Scene || evt.clickCount == 2)
-                    Selection.activeGameObject = row.GameObject;
+                if (_mode == Mode.Prefabs)
+                {
+                    EditorGUIUtility.PingObject(row.PrefabRoot);
+                    if (evt.clickCount == 2)
+                        OpenInPrefabMode(row);
+                }
+                else
+                {
+                    EditorGUIUtility.PingObject(row.GameObject);
+                    if (_mode == Mode.Scene || evt.clickCount == 2)
+                        Selection.activeGameObject = row.GameObject;
+                }
                 GUIUtility.keyboardControl = 0;
                 evt.Use();
             }
@@ -914,11 +976,23 @@ namespace PicoShot.Localization.Editor.Tabs
             var menu = new GenericMenu();
             var go = row.GameObject;
 
-            menu.AddItem(new GUIContent("Select in Hierarchy"), false, () =>
+            if (_mode == Mode.Prefabs)
             {
-                Selection.activeGameObject = go;
-                EditorGUIUtility.PingObject(go);
-            });
+                menu.AddItem(new GUIContent("Open Prefab"), false, () => OpenInPrefabMode(row));
+                menu.AddItem(new GUIContent("Select Prefab Asset"), false, () =>
+                {
+                    Selection.activeObject = row.PrefabRoot;
+                    EditorGUIUtility.PingObject(row.PrefabRoot);
+                });
+            }
+            else
+            {
+                menu.AddItem(new GUIContent("Select in Hierarchy"), false, () =>
+                {
+                    Selection.activeGameObject = go;
+                    EditorGUIUtility.PingObject(go);
+                });
+            }
 
             if (row.Localization != null)
             {
@@ -932,14 +1006,21 @@ namespace PicoShot.Localization.Editor.Tabs
 
                 menu.AddItem(new GUIContent("Change Key…"), false, () => ShowKeyPicker(loc, default, centered: true));
                 menu.AddSeparator("");
-                menu.AddItem(new GUIContent("Remove Localization"), false, () =>
+                if (_mode == Mode.Prefabs)
                 {
-                    if (loc == null)
-                        return;
-                    Undo.DestroyObjectImmediate(loc);
-                    _rowsDirty = true;
-                    Editor.ShowNotification(new GUIContent($"Removed localization from {go.name} ({UndoShortcut} to undo)"));
-                });
+                    menu.AddDisabledItem(new GUIContent("Remove Localization (open the prefab to remove it)"));
+                }
+                else
+                {
+                    menu.AddItem(new GUIContent("Remove Localization"), false, () =>
+                    {
+                        if (loc == null)
+                            return;
+                        Undo.DestroyObjectImmediate(loc);
+                        _rowsDirty = true;
+                        Editor.ShowNotification(new GUIContent($"Removed localization from {go.name} ({UndoShortcut} to undo)"));
+                    });
+                }
             }
             else
             {
@@ -1255,6 +1336,7 @@ namespace PicoShot.Localization.Editor.Tabs
             var serialized = new SerializedObject(loc);
             serialized.FindProperty("translationKey").stringValue = key;
             serialized.ApplyModifiedProperties();
+            SaveIfAsset(loc);
         }
 
         private static void SetIntProperty(LocalizationTextComponent loc, string property, int value)
@@ -1262,6 +1344,147 @@ namespace PicoShot.Localization.Editor.Tabs
             var serialized = new SerializedObject(loc);
             serialized.FindProperty(property).intValue = value;
             serialized.ApplyModifiedProperties();
+            SaveIfAsset(loc);
+        }
+
+        /// <summary>
+        /// Edits made from Prefabs mode change the prefab asset directly; write it to disk right away.
+        /// </summary>
+        private static void SaveIfAsset(Object target)
+        {
+            if (EditorUtility.IsPersistent(target))
+                AssetDatabase.SaveAssetIfDirty(target);
+        }
+
+        #endregion
+
+        #region Prefab Scan
+
+        /// <summary>
+        /// Loads every prefab under Assets and collects its localized components. Components inherited
+        /// unchanged from a nested prefab or a variant base are listed only once, at their source prefab.
+        /// </summary>
+        private void ScanPrefabs()
+        {
+            var paths = AssetDatabase.FindAssets("t:Prefab", new[] { "Assets" })
+                .Select(AssetDatabase.GUIDToAssetPath)
+                .Distinct()
+                .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            _prefabRows.Clear();
+            int scanned = 0;
+            int withText = 0;
+            bool cancelled = false;
+            var noExclusions = new HashSet<Component>();
+
+            try
+            {
+                for (int i = 0; i < paths.Count; i++)
+                {
+                    string path = paths[i];
+                    if (EditorUtility.DisplayCancelableProgressBar("Scanning Prefabs", path, (float)i / paths.Count))
+                    {
+                        cancelled = true;
+                        break;
+                    }
+
+                    scanned++;
+                    var root = AssetDatabase.LoadAssetAtPath<GameObject>(path);
+                    if (root == null)
+                        continue;
+
+                    bool found = false;
+                    foreach (var loc in root.GetComponentsInChildren<LocalizationTextComponent>(true))
+                    {
+                        if (IsInheritedUnchanged(loc))
+                            continue;
+
+                        var (text, type) = GetPrimaryText(loc.gameObject, noExclusions);
+                        string inner = GetInnerPath(loc.transform, root.transform);
+                        _prefabRows.Add(new Row
+                        {
+                            GameObject = loc.gameObject,
+                            Text = text,
+                            Type = type,
+                            Localization = loc,
+                            PrefabRoot = root,
+                            InnerPath = inner,
+                            Path = inner.Length == 0 ? root.name : $"{root.name}/{inner}",
+                            Scene = path
+                        });
+                        found = true;
+                    }
+
+                    if (found)
+                        withText++;
+                }
+            }
+            finally
+            {
+                EditorUtility.ClearProgressBar();
+            }
+
+            _prefabsScanned = scanned;
+            _prefabsWithText = withText;
+            _prefabScanTime = DateTime.Now;
+            _rowsDirty = true;
+            _scroll = Vector2.zero;
+
+            if (cancelled)
+                Editor.ShowNotification(new GUIContent($"Scan stopped after {scanned} of {paths.Count} prefabs"));
+        }
+
+        private static bool IsInheritedUnchanged(LocalizationTextComponent loc)
+        {
+            var source = PrefabUtility.GetCorrespondingObjectFromSource(loc);
+            return source != null &&
+                   source.TranslationKey == loc.TranslationKey &&
+                   source.ArrayIndex == loc.ArrayIndex &&
+                   source.ArraySizeLimit == loc.ArraySizeLimit;
+        }
+
+        /// <summary>
+        /// Path below the prefab root, without the root's own name ("" for the root itself).
+        /// </summary>
+        private static string GetInnerPath(Transform transform, Transform root)
+        {
+            var parts = new List<string>();
+            for (var t = transform; t != null && t != root; t = t.parent)
+                parts.Add(t.name);
+            parts.Reverse();
+            return string.Join("/", parts);
+        }
+
+        private static void OpenInPrefabMode(Row row)
+        {
+            var root = row.PrefabRoot;
+            string inner = row.InnerPath;
+
+            EditorApplication.delayCall += () =>
+            {
+                if (root == null || !AssetDatabase.OpenAsset(root))
+                    return;
+
+                var stage = PrefabStageUtility.GetCurrentPrefabStage();
+                if (stage == null)
+                    return;
+
+                var contents = stage.prefabContentsRoot.transform;
+                var target = string.IsNullOrEmpty(inner) ? contents : contents.Find(inner);
+                if (target == null)
+                    return;
+
+                Selection.activeGameObject = target.gameObject;
+                EditorGUIUtility.PingObject(target.gameObject);
+            };
+        }
+
+        private static string FormatAge(TimeSpan age)
+        {
+            if (age.TotalSeconds < 60) return "just now";
+            if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min ago";
+            return $"at {DateTime.Now - age:HH:mm}";
         }
 
         #endregion
@@ -1295,6 +1518,11 @@ namespace PicoShot.Localization.Editor.Tabs
                 else if (_mode == Mode.Scene)
                 {
                     GUILayout.Label("Click a row to select the object · right-click for more", Styles.MutedLabel);
+                    GUILayout.FlexibleSpace();
+                }
+                else if (_mode == Mode.Prefabs && _prefabScanTime != null)
+                {
+                    GUILayout.Label("Click to find the prefab · double-click to open it · right-click for more", Styles.MutedLabel);
                     GUILayout.FlexibleSpace();
                 }
                 else
