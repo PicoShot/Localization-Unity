@@ -131,18 +131,18 @@ namespace PicoShot.Localization.Editor.Data
         public const string TranslationProviderPref = "PicoShot_Localization_TranslationProvider";
         public TranslationProvider ActiveTranslationProvider
         {
-            get => (TranslationProvider)PlayerPrefs.GetInt(TranslationProviderPref, (int)TranslationProvider.DeepL);
-            set => PlayerPrefs.SetInt(TranslationProviderPref, (int)value);
+            get => (TranslationProvider)ProjectPrefs.GetInt(TranslationProviderPref, (int)TranslationProvider.DeepL);
+            set => ProjectPrefs.SetInt(TranslationProviderPref, (int)value);
         }
 
         // Key View Settings
         public const string ViewDelimiterPref = "PicoShot_Localization_ViewDelimiter";
         public ViewDelimiter ActiveViewDelimiter
         {
-            get => (ViewDelimiter)PlayerPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot);
+            get => (ViewDelimiter)ProjectPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot);
             set
             {
-                PlayerPrefs.SetInt(ViewDelimiterPref, (int)value);
+                ProjectPrefs.SetInt(ViewDelimiterPref, (int)value);
                 _cachedViewDelimiter = DelimiterChar(value);
             }
         }
@@ -154,7 +154,7 @@ namespace PicoShot.Localization.Editor.Data
         public static char GetCurrentViewDelimiter()
         {
             if (_cachedViewDelimiter == '\0')
-                _cachedViewDelimiter = DelimiterChar((ViewDelimiter)PlayerPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot));
+                _cachedViewDelimiter = DelimiterChar((ViewDelimiter)ProjectPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot));
             return _cachedViewDelimiter;
         }
 
@@ -173,8 +173,8 @@ namespace PicoShot.Localization.Editor.Data
 
         public string DeeplApiUrl
         {
-            get => PlayerPrefs.GetString(DeeplApiUrlPref, DefaultDeeplApiUrl);
-            set => PlayerPrefs.SetString(DeeplApiUrlPref, value);
+            get => ProjectPrefs.GetString(DeeplApiUrlPref, DefaultDeeplApiUrl);
+            set => ProjectPrefs.SetString(DeeplApiUrlPref, value);
         }
 
         public string DeeplApiKey
@@ -185,8 +185,8 @@ namespace PicoShot.Localization.Editor.Data
 
         public string DeeplContext
         {
-            get => PlayerPrefs.GetString(DeeplContextPref, DefaultDeepLContext);
-            set => PlayerPrefs.SetString(DeeplContextPref, value);
+            get => ProjectPrefs.GetString(DeeplContextPref, DefaultDeepLContext);
+            set => ProjectPrefs.SetString(DeeplContextPref, value);
         }
 
         // Gemini Settings
@@ -206,20 +206,20 @@ namespace PicoShot.Localization.Editor.Data
 
         public string GeminiModel
         {
-            get => PlayerPrefs.GetString(GeminiModelPref, DefaultGeminiModel);
-            set => PlayerPrefs.SetString(GeminiModelPref, value);
+            get => ProjectPrefs.GetString(GeminiModelPref, DefaultGeminiModel);
+            set => ProjectPrefs.SetString(GeminiModelPref, value);
         }
 
         public string GeminiCustomModel
         {
-            get => PlayerPrefs.GetString(GeminiCustomModelPref, "");
-            set => PlayerPrefs.SetString(GeminiCustomModelPref, value);
+            get => ProjectPrefs.GetString(GeminiCustomModelPref, "");
+            set => ProjectPrefs.SetString(GeminiCustomModelPref, value);
         }
 
         public string GeminiContext
         {
-            get => PlayerPrefs.GetString(GeminiContextPref, DefaultGeminiContext);
-            set => PlayerPrefs.SetString(GeminiContextPref, value);
+            get => ProjectPrefs.GetString(GeminiContextPref, DefaultGeminiContext);
+            set => ProjectPrefs.SetString(GeminiContextPref, value);
         }
 
         // Constants

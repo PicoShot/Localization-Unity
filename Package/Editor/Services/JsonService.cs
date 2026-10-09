@@ -151,7 +151,8 @@ namespace PicoShot.Localization.Editor.Services
         /// <summary>
         /// Exports all localization data to a JSON file.
         /// </summary>
-        public void ExportToJson()
+        /// <returns>True when the file was written.</returns>
+        public bool ExportToJson()
         {
             string path = EditorUtility.SaveFilePanel(
                 "Export Localization Data to JSON",
@@ -159,7 +160,7 @@ namespace PicoShot.Localization.Editor.Services
                 $"Localization_Export_{DateTime.Now:yyyyMMdd_HHmmss}.json",
                 "json");
 
-            if (string.IsNullOrEmpty(path)) return;
+            if (string.IsNullOrEmpty(path)) return false;
 
             try
             {
@@ -211,11 +212,13 @@ namespace PicoShot.Localization.Editor.Services
 
                 EditorUtility.DisplayDialog("Export Successful",
                     $"Exported {_data.Keys.Count} keys across {_data.LanguageCodes.Count} languages to:\n{path}", "OK");
+                return true;
             }
             catch (Exception ex)
             {
                 EditorUtility.DisplayDialog("Export Failed", $"Failed to export data: {ex.Message}", "OK");
                 Debug.LogError($"[LocalizationEditor] JSON export failed: {ex}");
+                return false;
             }
         }
 

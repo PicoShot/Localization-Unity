@@ -61,6 +61,33 @@ namespace PicoShot.Localization.Editor.Services
         }
 
         /// <summary>
+        /// Counts locale files whose stored hash is missing or different, plus stored hashes of deleted files.
+        /// </summary>
+        public static int CountOutOfSync(LocalizationConfig config)
+        {
+            string languagesPath = LocalizationManager.LanguagesPath;
+            if (config == null || !Directory.Exists(languagesPath))
+                return 0;
+
+            int outOfSync = 0;
+            var stored = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var entry in config.GetFileHashes())
+                stored.Add(entry.fileName);
+
+            foreach (var file in Directory.GetFiles(languagesPath, "*" + LocalizationManager.FileExtension, SearchOption.TopDirectoryOnly))
+            {
+                string fileName = Path.GetFileName(file);
+                stored.Remove(fileName);
+
+                if (!config.TryGetFileHash(fileName, out string existing) ||
+                    !string.Equals(existing, LocalizationManager.CalculateFileHash(file), StringComparison.OrdinalIgnoreCase))
+                    outOfSync++;
+            }
+
+            return outOfSync + stored.Count;
+        }
+
+        /// <summary>
         /// Syncs hashes when anti-tamper protection is enabled. Must run on the main thread.
         /// </summary>
         public static void SyncIfEnabled(string reason)

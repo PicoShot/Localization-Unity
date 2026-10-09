@@ -1,33 +1,79 @@
-using System.Collections.Generic;
+using System;
 using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEngine;
 using PicoShot.Localization.Config;
+using PicoShot.Localization.Data;
 using PicoShot.Localization.Editor.Data;
 using PicoShot.Localization.Editor.Mcp;
 using PicoShot.Localization.Editor.Services;
-using PicoShot.Localization.Data;
+using Styles = PicoShot.Localization.Editor.LocalizationEditorStyles;
 
 namespace PicoShot.Localization.Editor.Tabs
 {
     /// <summary>
-    /// Tab for configuration settings and file operations.
+    /// Project, translation, file/build and MCP settings.
     /// </summary>
     public sealed class ConfigTab : LocalizationEditorTabBase
     {
-        private readonly JsonService _jsonService;
-
         private enum ConfigSubTab
         {
             General,
             Translation,
-            Data,
+            FilesAndBuild,
             Mcp
         }
 
-        private static readonly string[] SubTabNames = { "General", "Translation", "Data", "MCP" };
+        private enum TestState
+        {
+            None,
+            Testing,
+            Ok,
+            Failed
+        }
+
+        private const float LabelWidth = 130f;
+        private const double FileInfoRefreshSeconds = 3d;
+        private const string DeeplProUrl = "https://api.deepl.com/v2/translate";
+
+        private const string ScopeProject = "Shared · saved in the project config";
+        private const string ScopeUser = "Only you · this project";
+        private const string ScopeMachine = "Only you · every project on this machine";
+
+        private static readonly string[] SubTabNames = { "General", "Translation", "Files & Build", "MCP" };
+        private static readonly string[] ProviderNames = { "DeepL", "Gemini" };
+        private static readonly string[] DelimiterNames = { "Dot  .", "Underscore  _" };
+        private static readonly string[] GeminiModels =
+        {
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-3-flash-preview",
+            "gemini-3.1-flash-lite-preview",
+            "gemini-3.5-flash",
+            "custom"
+        };
+
+        private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+        private readonly JsonService _jsonService;
         private ConfigSubTab _activeSubTab = ConfigSubTab.General;
+        private Vector2 _scroll;
+
+        // Translation
+        private bool _showApiKey;
+        private TestState _testState;
+        private string _testMessage = "";
+        private string _testedFor;
+
+        // Files & Build, refreshed every few seconds
+        private double _fileInfoTime = -1d;
+        private int _fileCount;
+        private long _fileBytes;
+        private int _hashesOutOfSync = -1;
 
         public ConfigTab(LocalizationEditor editor, LanguageEditorData data) : base(editor, data)
         {
@@ -36,6 +82,11 @@ namespace PicoShot.Localization.Editor.Tabs
 
         public override string TabName => "Settings";
 
+        public override void OnEnter()
+        {
+            _fileInfoTime = -1d;
+        }
+
         public override void Draw()
         {
             var config = LocalizationConfigProvider.Config;
@@ -43,562 +94,671 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             {
                 DrawSectionHeader("Settings");
-                DrawSubTabToolbar();
+
+                EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
+                int selected = GUILayout.Toolbar((int)_activeSubTab, SubTabNames, EditorStyles.toolbarButton);
+                if (selected != (int)_activeSubTab)
+                {
+                    _activeSubTab = (ConfigSubTab)selected;
+                    _fileInfoTime = -1d;
+                    GUIUtility.keyboardControl = 0;
+                }
+                EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.Space(5);
 
-                using (BeginBox())
+                _scroll = EditorGUILayout.BeginScrollView(_scroll, GUILayout.ExpandHeight(true));
                 {
                     switch (_activeSubTab)
                     {
                         case ConfigSubTab.General:
-                            DrawGeneralTab(config);
+                            DrawGeneral(config);
                             break;
                         case ConfigSubTab.Translation:
-                            DrawTranslationTab();
+                            DrawTranslation();
                             break;
-                        case ConfigSubTab.Data:
-                            DrawDataTab(config);
+                        case ConfigSubTab.FilesAndBuild:
+                            DrawFilesAndBuild(config);
                             break;
                         case ConfigSubTab.Mcp:
-                            DrawMcpTab();
+                            DrawMcp();
                             break;
                     }
+                    EditorGUILayout.Space(6);
                 }
+                EditorGUILayout.EndScrollView();
             }
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawSubTabToolbar()
+        #region Layout Helpers
+
+        private static void BeginRow(string label, string tooltip = null)
         {
-            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
-            for (int i = 0; i < SubTabNames.Length; i++)
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent(label, tooltip), GUILayout.Width(LabelWidth));
+        }
+
+        private static void EndRow()
+        {
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private static void Description(string text, GUIStyle style = null)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(LabelWidth + 4f);
+            GUILayout.Label(text, style ?? Styles.Description);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(6);
+        }
+
+        private static void SectionGap()
+        {
+            EditorGUILayout.Space(14);
+        }
+
+        private static void ChangeConfig(LocalizationConfig config, string undoName, Action change)
+        {
+            Undo.RecordObject(config, undoName);
+            change();
+            LocalizationConfigProvider.SaveConfig();
+        }
+
+        private static Rect BadgeRect(string text)
+        {
+            return GUILayoutUtility.GetRect(Styles.GetBadgeWidth(text), 18f, GUILayout.ExpandWidth(false));
+        }
+
+        #endregion
+
+        #region General
+
+        private void DrawGeneral(LocalizationConfig config)
+        {
+            Styles.DrawSectionTitle("Project", ScopeProject);
+
+            BeginRow("Default language", "The source language of the project");
             {
-                bool isActive = _activeSubTab == (ConfigSubTab)i;
-                GUI.backgroundColor = isActive ? new Color(0.7f, 0.7f, 0.7f) : Color.white;
-                if (GUILayout.Button(SubTabNames[i], EditorStyles.toolbarButton))
+                string current = config.DefaultLanguage;
+                var content = new GUIContent($"{LanguageDefinitions.GetDisplayName(current)} ({current})");
+                var rect = EditorGUILayout.GetControlRect(GUILayout.MaxWidth(260));
+                if (EditorGUI.DropdownButton(rect, content, FocusType.Keyboard))
+                    ShowDefaultLanguageMenu(rect, config);
+            }
+            EndRow();
+            Description("Other languages are translated from it, and missing text falls back to it. Also shown as SOURCE in the Keys tab.");
+
+            BeginRow("Mixed LTR/RTL text", "Bidirectional handling of mixed text");
+            {
+                bool mixed = EditorGUILayout.Toggle(config.SupportMixedText);
+                if (mixed != config.SupportMixedText)
+                    ChangeConfig(config, "Change Mixed Text Support", () => config.SetSupportMixedText(mixed));
+            }
+            EndRow();
+            Description("Fixes Arabic, Persian and other RTL words inside LTR text (and the other way around) separately, instead of reversing the whole string.");
+
+            SectionGap();
+            Styles.DrawSectionTitle("Editor", ScopeUser);
+
+            BeginRow("View delimiter", "Character that separates a view from the rest of the key name");
+            {
+                int index = Data.ActiveViewDelimiter == ViewDelimiter.Dot ? 0 : 1;
+                int newIndex = EditorGUILayout.Popup(index, DelimiterNames, GUILayout.MaxWidth(160));
+                if (newIndex != index)
                 {
-                    _activeSubTab = (ConfigSubTab)i;
-                    GUI.FocusControl(null);
+                    Data.ActiveViewDelimiter = newIndex == 0 ? ViewDelimiter.Dot : ViewDelimiter.Underscore;
+                    Data.SelectedView = "";
+                    GUIUtility.keyboardControl = 0;
                 }
-                GUI.backgroundColor = Color.white;
             }
-            EditorGUILayout.EndHorizontal();
+            EndRow();
+            Description($"Keys are grouped into views by the text before the first '{Data.CurrentViewDelimiter}', e.g. 'menu{Data.CurrentViewDelimiter}play' is in the 'menu' view. " +
+                        "Only affects how the editor groups keys; key names don't change.");
         }
 
-        private void DrawGeneralTab(LocalizationConfig config)
+        private void ShowDefaultLanguageMenu(Rect rect, LocalizationConfig config)
         {
-            DrawDefaultLanguageSection(config);
-            DrawKeyViewSettings();
-            DrawTypedKeySettings(config);
-            DrawTextProcessingSettings(config);
-            DrawCompressionSettings(config);
-            DrawProtectionSettings(config);
-        }
-
-        private void DrawTranslationTab()
-        {
-            DrawTranslationSettings();
-        }
-
-        private void DrawDataTab(LocalizationConfig config)
-        {
-            DrawFileOperations();
-            DrawPathInfo();
-        }
-
-        private void DrawMcpTab()
-        {
-            EditorGUILayout.LabelField("MCP Server", EditorStyles.boldLabel);
-
-            bool running = LocalizationMcpServer.IsRunning;
-
-            string endpoint = running ? LocalizationMcpServer.Url : LocalizationMcpServer.ConfiguredUrl;
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Endpoint:", GUILayout.Width(80));
-            EditorGUILayout.SelectableLabel(endpoint, GUILayout.Height(18));
-            if (GUILayout.Button("Copy", GUILayout.Width(60)))
+            var menu = new GenericMenu();
+            foreach (var lang in Data.GetLanguagesDefaultFirst())
             {
-                EditorGUIUtility.systemCopyBuffer = endpoint;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space(5);
-            EditorGUILayout.BeginHorizontal();
-            if (running)
-            {
-                if (GUILayout.Button("Stop Server", GUILayout.Height(25)))
+                string captured = lang;
+                menu.AddItem(new GUIContent($"{LanguageDefinitions.GetDisplayName(lang)} ({lang})"), config.DefaultLanguage == lang, () =>
                 {
-                    LocalizationMcpServer.Stop();
+                    ChangeConfig(config, "Change Default Language", () => config.SetDefaultLanguage(captured));
                     Editor.Repaint();
-                }
-                if (GUILayout.Button("Restart Server", GUILayout.Height(25)))
+                });
+            }
+            menu.DropDown(rect);
+        }
+
+        #endregion
+
+        #region Translation
+
+        private void DrawTranslation()
+        {
+            Styles.DrawSectionTitle("Provider", ScopeUser);
+
+            BeginRow("Service", "Used by Translate in the Keys tab and by Bulk Translate in Tools");
+            {
+                int index = (int)Data.ActiveTranslationProvider;
+                int newIndex = GUILayout.Toolbar(index, ProviderNames, EditorStyles.miniButton, GUILayout.Width(160));
+                if (newIndex != index)
                 {
-                    LocalizationMcpServer.RestartFromMenu();
-                    Editor.Repaint();
+                    Data.ActiveTranslationProvider = (TranslationProvider)newIndex;
+                    GUIUtility.keyboardControl = 0;
                 }
             }
-            else
-            {
-                if (GUILayout.Button("Start Server", GUILayout.Height(25)))
-                {
-                    LocalizationMcpServer.StartFromMenu();
-                    Editor.Repaint();
-                }
-            }
-            EditorGUILayout.EndHorizontal();
+            EndRow();
+            Description(Data.ActiveTranslationProvider == TranslationProvider.DeepL
+                ? "DeepL translates one language at a time and keeps placeholders intact. Needs a DeepL API key (Free or Pro)."
+                : "Gemini translates into all missing languages in one request, guided by your prompt. Needs a Google AI Studio API key.");
 
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Open Status Page", GUILayout.Height(25)))
-            {
-                LocalizationMcpServer.OpenStatusPage();
-            }
-            if (GUILayout.Button("Copy Agent Config", GUILayout.Height(25)))
-            {
-                LocalizationMcpServer.CopyAgentConfig();
-                Editor.Repaint();
-            }
-            EditorGUILayout.EndHorizontal();
+            SectionGap();
 
-            EditorGUILayout.Space(5);
-            EditorGUILayout.LabelField("Server Settings", EditorStyles.boldLabel);
+            bool deepL = Data.ActiveTranslationProvider == TranslationProvider.DeepL;
+            Styles.DrawSectionTitle(deepL ? "DeepL" : "Gemini", "API key: " + ScopeMachine.ToLowerInvariant());
 
-            bool autoStart = LocalizationMcpServer.AutoStart;
-            bool newAutoStart = EditorGUILayout.Toggle("Start automatically", autoStart);
-            if (newAutoStart != autoStart)
-            {
-                LocalizationMcpServer.AutoStart = newAutoStart;
-            }
+            DrawApiKeyRow(deepL);
 
-            int port = LocalizationMcpServer.PortPrefValue;
-            int newPort = EditorGUILayout.IntField("Port", port);
-            newPort = Mathf.Clamp(newPort, 1, 65535);
-            if (newPort != port)
-            {
-                LocalizationMcpServer.PortPrefValue = newPort;
-                Editor.Repaint();
-            }
-            if (LocalizationMcpServer.IsRunning && LocalizationMcpServer.PortPrefValue != LocalizationMcpServer.Port)
-            {
-                DrawHelpBox(
-                    $"Port changed to {LocalizationMcpServer.PortPrefValue}. " +
-                    $"Restart the server to switch from {LocalizationMcpServer.Port} (agents must reconnect).");
-            }
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawDefaultLanguageSection(LocalizationConfig config)
-        {
-            EditorGUILayout.LabelField("Default Language", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Default:", GUILayout.Width(80));
-
-            var currentDefault = config.DefaultLanguage;
-            var content = new GUIContent(LanguageDefinitions.GetDisplayName(currentDefault));
-            var dropdownRect = EditorGUILayout.GetControlRect(GUILayout.ExpandWidth(true));
-
-            if (EditorGUI.DropdownButton(dropdownRect, content, FocusType.Keyboard))
-            {
-                ShowDefaultLanguageDropdown(dropdownRect, config, currentDefault);
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawKeyViewSettings()
-        {
-            EditorGUILayout.LabelField("Key Views", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Grouping Delimiter:", GUILayout.Width(150));
-            int delimiterIndex = Data.ActiveViewDelimiter == ViewDelimiter.Dot ? 0 : 1;
-            int newDelimiterIndex = EditorGUILayout.Popup(delimiterIndex, new[] { "Dot . (standard)", "Underscore _ (legacy)" });
-            var newDelimiter = newDelimiterIndex == 0 ? ViewDelimiter.Dot : ViewDelimiter.Underscore;
-            if (newDelimiter != Data.ActiveViewDelimiter)
-            {
-                Data.ActiveViewDelimiter = newDelimiter;
-                Data.SelectedView = "";
-                GUI.FocusControl(null);
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.HelpBox("Views group keys by the first delimiter. This changes editor grouping only; existing key names are not renamed.", MessageType.None);
-            EditorGUILayout.Space();
-        }
-
-        private void DrawTypedKeySettings(LocalizationConfig config)
-        {
-            EditorGUILayout.LabelField("Typed Keys", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(new GUIContent(
-                "Generate Typed Keys:",
-                "Generate hash-backed StringKeys and ArrayKeys enums when localization data is saved."),
-                GUILayout.Width(150));
-            bool enabled = EditorGUILayout.Toggle(config.GenerateTypedKeys);
-            if (enabled != config.GenerateTypedKeys)
-            {
-                config.SetGenerateTypedKeys(enabled);
-                LocalizationConfigProvider.SaveConfig();
-            }
-            EditorGUILayout.EndHorizontal();
-
-            if (config.GenerateTypedKeys)
-            {
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("Regenerate Typed Keys", GUILayout.Width(180), GUILayout.Height(25)))
-                    TypedKeyGenerator.Generate(Data, showSuccessDialog: true);
-                EditorGUILayout.EndHorizontal();
-
-                EditorGUILayout.HelpBox(
-                    $"Generates StringKeys and ArrayKeys in {TypedKeyGenerator.GeneratedCodePath}. " +
-                    "Hashes are calculated at generation time for faster, type-safe runtime lookup.",
-                    MessageType.None);
-            }
-            else
-            {
-                EditorGUILayout.HelpBox(
-                    "Generation is disabled. Existing generated files are preserved so dependent code keeps compiling.",
-                    MessageType.None);
-            }
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawTextProcessingSettings(LocalizationConfig config)
-        {
-            EditorGUILayout.LabelField("Text Processing", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField(new GUIContent("Mixed LTR/RTL Support:", "Enable to automatically extract and fix Arabic/Persian/RTL words mixed inside LTR text (and vice-versa) instead of reversing the entire string."), GUILayout.Width(150));
-            bool newSupport = EditorGUILayout.Toggle(config.SupportMixedText);
-            if (newSupport != config.SupportMixedText)
-            {
-                config.SetSupportMixedText(newSupport);
-                LocalizationConfigProvider.SaveConfig();
-            }
-            EditorGUILayout.EndHorizontal();
-
-            if (config.SupportMixedText)
-            {
-                EditorGUILayout.HelpBox("Token-based Bi-Directional text rendering is enabled. This will dynamically isolate and fix RTL strings without breaking LTR words and punctuation.", MessageType.None);
-            }
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawCompressionSettings(LocalizationConfig config)
-        {
-            EditorGUILayout.LabelField("File Compression", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Compression:", GUILayout.Width(120));
-            var newMode = (CompressionMode)EditorGUILayout.EnumPopup(config.CompressionMode);
-            if (newMode != config.CompressionMode)
-            {
-                config.SetCompressionMode(newMode);
-                LocalizationConfigProvider.SaveConfig();
-                GUI.changed = true;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            string compressionHelp = config.CompressionMode switch
-            {
-                CompressionMode.Disabled => "No compression. Fastest save/load but largest file sizes.",
-                CompressionMode.Fastest => "Fast compression. Good for development with quick iteration times.",
-                CompressionMode.Optimal => "Best compression ratio. Smaller files but slower saves. Recommended for builds.",
-                _ => ""
-            };
-            EditorGUILayout.HelpBox(compressionHelp, MessageType.None);
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawProtectionSettings(LocalizationConfig config)
-        {
-            EditorGUILayout.LabelField("Protection Settings (experimental)", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Protection Mode:", GUILayout.Width(120));
-            var newMode = (ProtectionMode)EditorGUILayout.EnumPopup(config.ProtectionMode);
-            if (newMode != config.ProtectionMode)
-            {
-                config.SetProtectionMode(newMode);
-                LocalizationConfigProvider.SaveConfig();
-                LocaleHashSync.SyncIfEnabled("enabling anti-tamper");
-                GUI.changed = true;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            if (config.IsAntiTamperEnabled)
-            {
-                EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField("", GUILayout.Width(120));
-                if (GUILayout.Button("Sync File Hashes", GUILayout.Height(25)))
-                {
-                    SyncFileHashes(config);
-                }
-                EditorGUILayout.EndHorizontal();
-
-                DrawHelpBox(
-                    "Anti-Tamper: File hashes are verified at runtime. " +
-                    "Click 'Sync File Hashes' after modifying language files.");
-            }
-
-            string protectionHelp = config.ProtectionMode switch
-            {
-                ProtectionMode.Disabled => "Protection is disabled. All language files can be loaded.",
-                ProtectionMode.SelectionOnly => "Only selected languages can be loaded at runtime.",
-                ProtectionMode.AntiTamper => "Anti-tamper protection with hash verification.",
-                ProtectionMode.Both => "Full protection: Only selected languages can be loaded AND file hashes are verified.",
-                _ => ""
-            };
-            DrawHelpBox(protectionHelp);
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawTranslationSettings()
-        {
-            EditorGUILayout.LabelField("Translation API", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Provider:", GUILayout.Width(120));
-            var newProvider = (TranslationProvider)EditorGUILayout.EnumPopup(Data.ActiveTranslationProvider);
-            if (newProvider != Data.ActiveTranslationProvider)
-            {
-                Data.ActiveTranslationProvider = newProvider;
-                GUI.changed = true;
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space();
-
-            if (Data.ActiveTranslationProvider == TranslationProvider.DeepL)
-            {
+            if (deepL)
                 DrawDeepLSettings();
-            }
-            else if (Data.ActiveTranslationProvider == TranslationProvider.Gemini)
-            {
+            else
                 DrawGeminiSettings();
+        }
+
+        private void DrawApiKeyRow(bool deepL)
+        {
+            string key = deepL ? Data.DeeplApiKey : Data.GeminiApiKey;
+
+            // A different key, URL or model makes the last test result stale
+            string testTarget = deepL ? $"deepl|{key}|{Data.DeeplApiUrl}" : $"gemini|{key}|{GetGeminiModel()}";
+            if (_testedFor != testTarget && _testState != TestState.Testing)
+            {
+                _testState = TestState.None;
+                _testMessage = "";
             }
+
+            BeginRow("API key");
+            {
+                string newKey = _showApiKey ? EditorGUILayout.TextField(key) : EditorGUILayout.PasswordField(key);
+                if (newKey != key)
+                {
+                    newKey = newKey.Trim();
+                    if (deepL)
+                        Data.DeeplApiKey = newKey;
+                    else
+                        Data.GeminiApiKey = newKey;
+                    key = newKey;
+                }
+
+                var eye = _showApiKey
+                    ? Styles.Icon("animationvisibilitytoggleon", "Hide", "Hide the key")
+                    : Styles.Icon("animationvisibilitytoggleoff", "Show", "Show the key");
+                if (GUILayout.Button(eye, EditorStyles.miniButton, GUILayout.Width(eye.image != null ? 26 : 44)))
+                    _showApiKey = !_showApiKey;
+
+                using (new EditorGUI.DisabledScope(string.IsNullOrEmpty(key) || _testState == TestState.Testing))
+                {
+                    if (GUILayout.Button(new GUIContent("Test", "Check the key with the service"), EditorStyles.miniButton, GUILayout.Width(44)))
+                    {
+                        _testedFor = testTarget;
+                        if (deepL)
+                            TestDeepL(key, Data.DeeplApiUrl);
+                        else
+                            TestGemini(key, GetGeminiModel());
+                    }
+                }
+
+                var (text, color, tooltip) = string.IsNullOrEmpty(key) ? ("NOT SET", Styles.MutedText, "Paste your API key")
+                    : _testState switch
+                    {
+                        TestState.Testing => ("TESTING…", Styles.MutedText, "Contacting the service"),
+                        TestState.Ok => ("CONNECTED", Styles.Success, _testMessage),
+                        TestState.Failed => ("FAILED", Styles.Danger, _testMessage),
+                        _ => ("SET", Styles.Accent, "Key is set. Press Test to check it.")
+                    };
+                Styles.DrawBadge(BadgeRect(text), text, color, tooltip);
+            }
+            EndRow();
+
+            if (_testState is TestState.Ok or TestState.Failed && !string.IsNullOrEmpty(_testMessage))
+                Description(_testMessage, _testState == TestState.Failed ? Styles.WarningLabel : null);
+            else
+                Description("Stored in your editor preferences, never in the project or the build.");
         }
 
         private void DrawDeepLSettings()
         {
-            EditorGUILayout.LabelField("DeepL Settings", EditorStyles.boldLabel);
+            BeginRow("API URL");
+            {
+                string url = EditorGUILayout.TextField(Data.DeeplApiUrl);
+                if (url != Data.DeeplApiUrl)
+                    Data.DeeplApiUrl = url.Trim();
 
-            DrawApiUrlField();
-            DrawApiKeyField();
-            DrawDeepLContextField();
+                using (new EditorGUI.DisabledScope(Data.DeeplApiUrl == LanguageEditorData.DefaultDeeplApiUrl))
+                {
+                    if (GUILayout.Button("Reset", EditorStyles.miniButton, GUILayout.Width(48)))
+                    {
+                        Data.DeeplApiUrl = LanguageEditorData.DefaultDeeplApiUrl;
+                        GUIUtility.keyboardControl = 0;
+                    }
+                }
+            }
+            EndRow();
 
-            EditorGUILayout.Space();
+            // Free keys end with ":fx" and only work on api-free.deepl.com
+            string key = Data.DeeplApiKey ?? "";
+            bool freeKey = key.EndsWith(":fx", StringComparison.Ordinal);
+            bool freeUrl = Data.DeeplApiUrl.Contains("api-free.deepl.com");
+            if (key.Length > 0 && freeKey != freeUrl)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(LabelWidth + 4f);
+                GUILayout.Label(freeKey
+                        ? "This is a Free key (ends with :fx) but the URL is for DeepL Pro."
+                        : "This looks like a Pro key but the URL is for DeepL Free.",
+                    Styles.WarningLabel);
+                if (GUILayout.Button(freeKey ? "Use Free URL" : "Use Pro URL", EditorStyles.miniButton, GUILayout.ExpandWidth(false)))
+                {
+                    Data.DeeplApiUrl = freeKey ? LanguageEditorData.DefaultDeeplApiUrl : DeeplProUrl;
+                    GUIUtility.keyboardControl = 0;
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space(6);
+            }
+            else
+            {
+                Description("Free keys use api-free.deepl.com, Pro keys use api.deepl.com.");
+            }
+
+            DrawPromptField("Context", "Sent with every request to steer tone and length",
+                Data.DeeplContext, LanguageEditorData.DefaultDeepLContext, v => Data.DeeplContext = v);
         }
 
         private void DrawGeminiSettings()
         {
-            EditorGUILayout.LabelField("Gemini API Settings", EditorStyles.boldLabel);
-
-            DrawGeminiApiKeyField();
-            DrawGeminiModelField();
-
-            if (Data.GeminiModel == "custom")
+            BeginRow("Model");
             {
-                DrawGeminiCustomModelField();
+                int index = Array.IndexOf(GeminiModels, Data.GeminiModel);
+                if (index < 0)
+                    index = GeminiModels.Length - 1;
+
+                int newIndex = EditorGUILayout.Popup(index, GeminiModels, GUILayout.MaxWidth(240));
+                if (newIndex != index)
+                {
+                    Data.GeminiModel = GeminiModels[newIndex];
+                    GUIUtility.keyboardControl = 0;
+                }
+
+                if (Data.GeminiModel == "custom")
+                {
+                    string custom = EditorGUILayout.TextField(Data.GeminiCustomModel);
+                    if (custom != Data.GeminiCustomModel)
+                        Data.GeminiCustomModel = custom.Trim();
+                }
             }
+            EndRow();
+            Description(Data.GeminiModel == "custom"
+                ? "Enter any model id from Google AI Studio, e.g. gemini-2.5-pro."
+                : "Flash models are fast and cheap; Lite is the cheapest.");
 
-            DrawGeminiContextField();
-
-            EditorGUILayout.Space();
+            DrawPromptField("Prompt", "System instructions for the translation request",
+                Data.GeminiContext, LanguageEditorData.DefaultGeminiContext, v => Data.GeminiContext = v);
         }
 
-        private void DrawApiUrlField()
+        private static void DrawPromptField(string label, string tooltip, string value, string defaultValue, Action<string> setValue)
         {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("API URL:", GUILayout.Width(70));
-            Data.DeeplApiUrl = EditorGUILayout.TextField(Data.DeeplApiUrl);
-
-            GUI.enabled = Data.DeeplApiUrl != LanguageEditorData.DefaultDeeplApiUrl;
-            if (GUILayout.Button("Reset", GUILayout.Width(60)))
+            BeginRow(label, tooltip);
             {
-                Data.DeeplApiUrl = LanguageEditorData.DefaultDeeplApiUrl;
-                GUI.FocusControl(null);
-            }
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void DrawApiKeyField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("API Key:", GUILayout.Width(70));
-            Data.DeeplApiKey = EditorGUILayout.PasswordField(Data.DeeplApiKey);
-
-            GUI.enabled = !string.IsNullOrEmpty(Data.DeeplApiKey);
-            if (GUILayout.Button("Clear", GUILayout.Width(60)))
-            {
-                Data.DeeplApiKey = "";
-                GUI.FocusControl(null);
-            }
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void DrawDeepLContextField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Translation Context:", GUILayout.Width(150));
-
-            GUI.enabled = Data.DeeplContext != LanguageEditorData.DefaultDeepLContext;
-            if (GUILayout.Button("Reset to Default", GUILayout.Width(120)))
-            {
-                Data.DeeplContext = LanguageEditorData.DefaultDeepLContext;
-                GUI.FocusControl(null);
-            }
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-
-            Data.DeeplContext = EditorGUILayout.TextArea(Data.DeeplContext, GUILayout.MinHeight(60));
-        }
-
-        private void DrawGeminiApiKeyField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("API Key:", GUILayout.Width(70));
-            Data.GeminiApiKey = EditorGUILayout.PasswordField(Data.GeminiApiKey);
-
-            GUI.enabled = !string.IsNullOrEmpty(Data.GeminiApiKey);
-            if (GUILayout.Button("Clear", GUILayout.Width(60)))
-            {
-                Data.GeminiApiKey = "";
-                GUI.FocusControl(null);
-            }
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void DrawGeminiModelField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Model:", GUILayout.Width(70));
-
-            string[] defaultModels = {
-                "gemini-2.5-flash",
-                "gemini-2.5-flash-lite",
-                "gemini-3-flash-preview",
-                "gemini-3.1-flash-lite-preview",
-                "gemini-3.5-flash",
-                "custom"
-            };
-
-            int selectedIndex = System.Array.IndexOf(defaultModels, Data.GeminiModel);
-            if (selectedIndex == -1)
-                selectedIndex = defaultModels.Length - 1; // "custom" if unknown
-
-            int newIndex = EditorGUILayout.Popup(selectedIndex, defaultModels);
-            if (newIndex != selectedIndex)
-            {
-                Data.GeminiModel = defaultModels[newIndex];
-                GUI.FocusControl(null);
-            }
-
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void DrawGeminiCustomModelField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Custom Model:", GUILayout.Width(100));
-            Data.GeminiCustomModel = EditorGUILayout.TextField(Data.GeminiCustomModel);
-            EditorGUILayout.EndHorizontal();
-        }
-
-        private void DrawGeminiContextField()
-        {
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Translation prompt/context:", GUILayout.Width(200));
-
-            GUI.enabled = Data.GeminiContext != LanguageEditorData.DefaultGeminiContext;
-            if (GUILayout.Button("Reset to Default", GUILayout.Width(120)))
-            {
-                Data.GeminiContext = LanguageEditorData.DefaultGeminiContext;
-                GUI.FocusControl(null);
-            }
-            GUI.enabled = true;
-            EditorGUILayout.EndHorizontal();
-
-            Data.GeminiContext = EditorGUILayout.TextArea(Data.GeminiContext, GUILayout.MinHeight(80));
-        }
-
-        private void DrawFileOperations()
-        {
-            EditorGUILayout.LabelField("File Operations", EditorStyles.boldLabel);
-
-            EditorGUILayout.BeginHorizontal();
-
-            GUI.backgroundColor = Color.red;
-            if (GUILayout.Button("Delete All Language Data", GUILayout.Height(25)))
-            {
-                Editor.PurgeAllData();
-            }
-            GUI.backgroundColor = Color.white;
-
-            if (GUILayout.Button("Open Languages Folder", GUILayout.Height(25)))
-            {
-                OpenLanguagesFolder();
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginHorizontal();
-
-            if (GUILayout.Button("Export to JSON", GUILayout.Height(25)))
-            {
-                _jsonService.ExportToJson();
-                Editor.Repaint();
-            }
-
-            if (GUILayout.Button("Import from JSON", GUILayout.Height(25)))
-            {
-                _jsonService.ImportFromJson();
-                Editor.Repaint();
-            }
-
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space();
-        }
-
-        private void DrawPathInfo()
-        {
-            DrawHelpBox($"Languages Path: {LocalizationManager.LanguagesPath}");
-        }
-
-        private void ShowDefaultLanguageDropdown(Rect dropdownRect, LocalizationConfig config, string currentDefault)
-        {
-            var menu = new GenericMenu();
-
-            foreach (var lang in Data.LanguageCodes)
-            {
-                menu.AddItem(
-                    new GUIContent(LanguageDefinitions.GetDisplayName(lang)),
-                    currentDefault == lang,
-                    () =>
+                GUILayout.FlexibleSpace();
+                using (new EditorGUI.DisabledScope(value == defaultValue))
+                {
+                    if (GUILayout.Button("Reset to Default", EditorStyles.miniButton, GUILayout.Width(110)))
                     {
-                        config.SetDefaultLanguage(lang);
-                        LocalizationConfigProvider.SaveConfig();
-                        GUI.changed = true;
-                        Editor.Repaint();
+                        setValue(defaultValue);
+                        GUIUtility.keyboardControl = 0;
                     }
-                );
+                }
+            }
+            EndRow();
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(LabelWidth + 4f);
+            string newValue = EditorGUILayout.TextArea(value, Styles.TextArea, GUILayout.MinHeight(60));
+            if (newValue != value)
+                setValue(newValue);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(6);
+        }
+
+        private string GetGeminiModel()
+        {
+            return Data.GeminiModel == "custom" ? Data.GeminiCustomModel : Data.GeminiModel;
+        }
+
+        private async void TestDeepL(string key, string translateUrl)
+        {
+            _testState = TestState.Testing;
+            Editor.Repaint();
+
+            try
+            {
+                var uri = new Uri(translateUrl);
+                var request = new HttpRequestMessage(HttpMethod.Get, $"{uri.Scheme}://{uri.Authority}/v2/usage");
+                request.Headers.Add("Authorization", $"DeepL-Auth-Key {key}");
+
+                var response = await Http.SendAsync(request);
+                string body = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var usage = JsonUtility.FromJson<DeepLUsage>(body);
+                    string plan = key.EndsWith(":fx", StringComparison.Ordinal) ? "DeepL Free" : "DeepL Pro";
+                    SetTestResult(TestState.Ok, usage != null && usage.character_limit > 0
+                        ? $"{plan} · {usage.character_count:N0} of {usage.character_limit:N0} characters used this billing period"
+                        : $"{plan} · key accepted");
+                }
+                else
+                {
+                    SetTestResult(TestState.Failed, (int)response.StatusCode switch
+                    {
+                        403 => "The API key was rejected. Check the key and whether it matches the Free/Pro URL.",
+                        456 => "The key works, but the character quota for this period is used up.",
+                        _ => $"DeepL answered {(int)response.StatusCode} {response.ReasonPhrase}."
+                    });
+                }
+            }
+            catch (UriFormatException)
+            {
+                SetTestResult(TestState.Failed, "The API URL isn't a valid address.");
+            }
+            catch (Exception ex)
+            {
+                SetTestResult(TestState.Failed, $"Couldn't reach DeepL: {ex.GetBaseException().Message}");
+            }
+        }
+
+        private async void TestGemini(string key, string model)
+        {
+            _testState = TestState.Testing;
+            Editor.Repaint();
+
+            if (string.IsNullOrWhiteSpace(model))
+            {
+                SetTestResult(TestState.Failed, "Enter a custom model id first.");
+                return;
             }
 
-            menu.DropDown(dropdownRect);
+            try
+            {
+                string url = $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}?key={Uri.EscapeDataString(key)}";
+                var response = await Http.GetAsync(url);
+                string body = await response.Content.ReadAsStringAsync();
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var info = JsonUtility.FromJson<GeminiModelInfo>(body);
+                    string name = !string.IsNullOrEmpty(info?.displayName) ? info.displayName : model;
+                    SetTestResult(TestState.Ok, $"Key accepted · {name} is available");
+                }
+                else
+                {
+                    SetTestResult(TestState.Failed, response.StatusCode switch
+                    {
+                        HttpStatusCode.NotFound => $"The key works, but the model '{model}' wasn't found.",
+                        HttpStatusCode.BadRequest or HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden => "The API key was rejected.",
+                        _ => $"Gemini answered {(int)response.StatusCode} {response.ReasonPhrase}."
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                SetTestResult(TestState.Failed, $"Couldn't reach Gemini: {ex.GetBaseException().Message}");
+            }
+        }
+
+        private void SetTestResult(TestState state, string message)
+        {
+            _testState = state;
+            _testMessage = message;
+            if (Editor != null)
+                Editor.Repaint();
+        }
+
+#pragma warning disable CS0649 // Filled by JsonUtility
+        [Serializable]
+        private class DeepLUsage
+        {
+            public long character_count;
+            public long character_limit;
+        }
+
+        [Serializable]
+        private class GeminiModelInfo
+        {
+            public string displayName;
+        }
+#pragma warning restore CS0649
+
+        #endregion
+
+        #region Files & Build
+
+        private void DrawFilesAndBuild(LocalizationConfig config)
+        {
+            RefreshFileInfo(config);
+            string path = LocalizationManager.LanguagesPath;
+
+            Styles.DrawSectionTitle("Locale Files", ScopeProject);
+
+            BeginRow("Folder");
+            {
+                GUILayout.Label(new GUIContent(path, path), Styles.MutedLabel, GUILayout.MinWidth(60));
+                if (GUILayout.Button("Open", EditorStyles.miniButtonLeft, GUILayout.Width(48)))
+                    OpenLanguagesFolder();
+                if (GUILayout.Button("Copy Path", EditorStyles.miniButtonRight, GUILayout.Width(72)))
+                    CopyToClipboard(path, "Copied folder path");
+            }
+            EndRow();
+            Description(_fileCount == 0
+                ? "No locale files yet. They're written when you save."
+                : $"{_fileCount} locale {(_fileCount == 1 ? "file" : "files")} · {EditorUtility.FormatBytes(_fileBytes)}");
+
+            BeginRow("Compression");
+            {
+                var mode = (CompressionMode)EditorGUILayout.EnumPopup(config.CompressionMode, GUILayout.MaxWidth(160));
+                if (mode != config.CompressionMode)
+                    ChangeConfig(config, "Change Compression", () => config.SetCompressionMode(mode));
+
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button(new GUIContent("Re-save Files", "Write every locale file again with the current settings (also saves unsaved edits)"),
+                        EditorStyles.miniButton, GUILayout.Width(90)))
+                {
+                    Editor.SaveLanguages();
+                    _fileInfoTime = -1d;
+                }
+            }
+            EndRow();
+            Description(config.CompressionMode switch
+            {
+                CompressionMode.Disabled => "No compression: fastest to save and load, largest files.",
+                CompressionMode.Fastest => "Light compression: quick saves, good while developing.",
+                CompressionMode.Optimal => "Smallest files, slower saves. Recommended for builds.",
+                _ => ""
+            } + " Applies the next time files are saved.");
+
+            BeginRow("Typed keys", "Generate StringKeys and ArrayKeys for type-safe lookups");
+            {
+                bool typed = EditorGUILayout.Toggle(config.GenerateTypedKeys, GUILayout.Width(18));
+                if (typed != config.GenerateTypedKeys)
+                    ChangeConfig(config, "Change Typed Keys", () => config.SetGenerateTypedKeys(typed));
+
+                GUILayout.FlexibleSpace();
+                using (new EditorGUI.DisabledScope(!config.GenerateTypedKeys))
+                {
+                    if (GUILayout.Button("Regenerate", EditorStyles.miniButton, GUILayout.Width(90)))
+                    {
+                        TypedKeyGenerator.Generate(Data, showSuccessDialog: true);
+                        GUIUtility.ExitGUI();
+                    }
+                }
+            }
+            EndRow();
+            Description(config.GenerateTypedKeys
+                ? $"Regenerated on every save into {TypedKeyGenerator.GeneratedCodePath}. Hashes are computed ahead of time for fast lookups."
+                : "Off. Existing generated files are kept, so code that uses them still compiles.");
+
+            BeginRow("Protection", "Experimental runtime checks on the locale files");
+            {
+                var mode = (ProtectionMode)EditorGUILayout.EnumPopup(config.ProtectionMode, GUILayout.MaxWidth(160));
+                if (mode != config.ProtectionMode)
+                {
+                    ChangeConfig(config, "Change Protection", () => config.SetProtectionMode(mode));
+                    LocaleHashSync.SyncIfEnabled("enabling anti-tamper");
+                    _fileInfoTime = -1d;
+                }
+
+                GUILayout.Space(6);
+                Styles.DrawBadge(BadgeRect("EXPERIMENTAL"), "EXPERIMENTAL", Styles.MutedText, "This feature may change");
+
+                if (config.IsAntiTamperEnabled && _hashesOutOfSync >= 0)
+                {
+                    GUILayout.Space(4);
+                    string text = _hashesOutOfSync == 0 ? "IN SYNC" : $"{_hashesOutOfSync} OUT OF SYNC";
+                    Styles.DrawBadge(BadgeRect(text), text, _hashesOutOfSync == 0 ? Styles.Success : Styles.Warning,
+                        _hashesOutOfSync == 0
+                            ? "Every locale file matches its stored hash"
+                            : "These files would fail verification at runtime. Sync the hashes after editing files outside the editor.");
+                }
+
+                GUILayout.FlexibleSpace();
+                if (config.IsAntiTamperEnabled && GUILayout.Button("Sync Hashes", EditorStyles.miniButton, GUILayout.Width(90)))
+                {
+                    SyncFileHashes(config);
+                    GUIUtility.ExitGUI();
+                }
+            }
+            EndRow();
+            Description(config.ProtectionMode switch
+            {
+                ProtectionMode.Disabled => "Off. Any locale file in the folder can be loaded.",
+                ProtectionMode.SelectionOnly => "Only the project's languages can be loaded at runtime.",
+                ProtectionMode.AntiTamper => "Files are checked against stored hashes at runtime. Hashes update automatically when you save.",
+                ProtectionMode.Both => "Only project languages load, and their files are checked against stored hashes.",
+                _ => ""
+            });
+
+            SectionGap();
+            Styles.DrawSectionTitle("JSON", "Every key in every language");
+
+            BeginRow("Backup & exchange");
+            {
+                if (GUILayout.Button("Export All…", EditorStyles.miniButtonLeft, GUILayout.Width(90)))
+                {
+                    _jsonService.ExportToJson();
+                    GUIUtility.ExitGUI();
+                }
+                if (GUILayout.Button("Import…", EditorStyles.miniButtonRight, GUILayout.Width(90)))
+                {
+                    Data.History.RecordAll("Import JSON");
+                    _jsonService.ImportFromJson();
+                    Editor.Repaint();
+                    GUIUtility.ExitGUI();
+                }
+                GUILayout.FlexibleSpace();
+            }
+            EndRow();
+            Description($"Import adds or overwrites keys from a JSON export. {UndoShortcut} undoes it.");
+
+            SectionGap();
+            DrawDangerZone();
+        }
+
+        private void DrawDangerZone()
+        {
+            Styles.DrawSectionTitle("Danger Zone");
+
+            var rect = GUILayoutUtility.GetRect(0f, 26f, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint)
+            {
+                var tint = Styles.Danger;
+                tint.a = 0.08f;
+                EditorGUI.DrawRect(rect, tint);
+            }
+
+            int languages = Data.LanguageCodes.Count;
+            int keys = Data.Keys.Count;
+            var buttonRect = new Rect(rect.xMax - 86f, rect.y + 4f, 80f, rect.height - 8f);
+
+            GUI.Label(new Rect(rect.x + 6f, rect.y, 200f, rect.height), "Delete all language data", EditorStyles.boldLabel);
+            GUI.Label(new Rect(rect.x + 206f, rect.y, Mathf.Max(0f, buttonRect.x - rect.x - 212f), rect.height),
+                $"{languages} {(languages == 1 ? "language" : "languages")} · {keys:N0} {(keys == 1 ? "key" : "keys")}", Styles.MutedLabel);
+
+            if (GUI.Button(buttonRect, "Delete…", EditorStyles.miniButton))
+            {
+                DeleteAllData(languages, keys);
+                GUIUtility.ExitGUI();
+            }
+
+            Description("Removes every key, every translation and every .bloc file, leaving only the default language. This can't be undone.");
+        }
+
+        private void DeleteAllData(int languages, int keys)
+        {
+            int choice = EditorUtility.DisplayDialogComplex("Delete All Language Data",
+                $"This deletes {keys:N0} keys in {languages} languages and every locale file in:\n{LocalizationManager.LanguagesPath}\n\n" +
+                "It can't be undone. Export a JSON backup first?",
+                "Export Backup & Delete", "Cancel", "Delete Without Backup");
+
+            if (choice == 1)
+                return;
+
+            if (choice == 0 && !_jsonService.ExportToJson())
+            {
+                EditorUtility.DisplayDialog("Delete All Language Data", "The backup wasn't saved, so nothing was deleted.", "OK");
+                return;
+            }
+
+            Editor.PurgeAllData(confirm: false);
+            _fileInfoTime = -1d;
+        }
+
+        private void RefreshFileInfo(LocalizationConfig config)
+        {
+            if (Event.current.type != EventType.Layout)
+                return;
+
+            double now = EditorApplication.timeSinceStartup;
+            if (_fileInfoTime >= 0d && now - _fileInfoTime < FileInfoRefreshSeconds)
+                return;
+            _fileInfoTime = now;
+
+            _fileCount = 0;
+            _fileBytes = 0;
+            _hashesOutOfSync = -1;
+
+            string path = LocalizationManager.LanguagesPath;
+            if (!Directory.Exists(path))
+                return;
+
+            try
+            {
+                foreach (var file in Directory.GetFiles(path, "*" + LocalizationManager.FileExtension, SearchOption.TopDirectoryOnly))
+                {
+                    _fileCount++;
+                    _fileBytes += new FileInfo(file).Length;
+                }
+
+                if (config.IsAntiTamperEnabled)
+                    _hashesOutOfSync = LocaleHashSync.CountOutOfSync(config);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[Localization] Couldn't read the locale folder: {ex.Message}");
+            }
         }
 
         private void SyncFileHashes(LocalizationConfig config)
@@ -607,19 +767,17 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 if (!Directory.Exists(LocalizationManager.LanguagesPath))
                 {
-                    EditorUtility.DisplayDialog("Error", "Languages directory not found.", "OK");
+                    EditorUtility.DisplayDialog("Sync Hashes", "The locale folder doesn't exist yet. Save first.", "OK");
                     return;
                 }
 
-                LocaleHashSync.Sync(config, out int syncedCount, out int removedCount);
-
-                EditorUtility.DisplayDialog("Hashes Synced",
-                    $"Successfully synced {syncedCount} file hashes.\n" +
-                    $"Removed {removedCount} outdated hashes.", "OK");
+                LocaleHashSync.Sync(config, out int synced, out int removed);
+                _fileInfoTime = -1d;
+                Editor.ShowNotification(new GUIContent($"Synced {synced} {(synced == 1 ? "hash" : "hashes")}" + (removed > 0 ? $", removed {removed}" : "")));
             }
-            catch (System.Exception ex)
+            catch (Exception ex)
             {
-                EditorUtility.DisplayDialog("Error", $"Failed to sync hashes: {ex.Message}", "OK");
+                EditorUtility.DisplayDialog("Sync Hashes", $"Failed to sync hashes: {ex.Message}", "OK");
                 Debug.LogError($"[LocalizationEditor] Hash sync failed: {ex}");
             }
         }
@@ -627,18 +785,118 @@ namespace PicoShot.Localization.Editor.Tabs
         private static void OpenLanguagesFolder()
         {
             string path = LocalizationManager.LanguagesPath;
-
             if (!Directory.Exists(path))
                 Directory.CreateDirectory(path);
 
-            try
+            string fullPath = Path.GetFullPath(path).Replace('\\', '/');
+            Application.OpenURL((fullPath.StartsWith("/") ? "file://" : "file:///") + fullPath);
+        }
+
+        #endregion
+
+        #region MCP
+
+        private void DrawMcp()
+        {
+            bool running = LocalizationMcpServer.IsRunning;
+            string endpoint = running ? LocalizationMcpServer.Url : LocalizationMcpServer.ConfiguredUrl;
+
+            Styles.DrawSectionTitle("MCP Server", "Lets AI agents read and edit your keys");
+
+            EditorGUILayout.BeginHorizontal();
             {
-                System.Diagnostics.Process.Start("explorer.exe", path);
+                string status = running ? "RUNNING" : "STOPPED";
+                Styles.DrawBadge(BadgeRect(status), status, running ? Styles.Success : Styles.MutedText,
+                    running ? "Agents can connect" : "Not accepting connections");
+                GUILayout.Space(6);
+
+                EditorGUILayout.SelectableLabel(endpoint, EditorStyles.textField, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+
+                if (GUILayout.Button("Copy", EditorStyles.miniButtonLeft, GUILayout.Width(48)))
+                    CopyToClipboard(endpoint, "Copied endpoint");
+
+                if (running)
+                {
+                    if (GUILayout.Button("Restart", EditorStyles.miniButtonMid, GUILayout.Width(56)))
+                        LocalizationMcpServer.RestartFromMenu();
+                    if (GUILayout.Button("Stop", EditorStyles.miniButtonRight, GUILayout.Width(48)))
+                        LocalizationMcpServer.Stop();
+                }
+                else if (GUILayout.Button("Start", EditorStyles.miniButtonRight, GUILayout.Width(56)))
+                {
+                    LocalizationMcpServer.StartFromMenu();
+                }
             }
-            catch (System.Exception e)
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
             {
-                Debug.LogError($"Error opening languages folder: {e}");
+                if (GUILayout.Button(new GUIContent("Copy Agent Config", "Ready-to-paste MCP config for Claude, Cursor and other agents"),
+                        EditorStyles.miniButtonLeft, GUILayout.Width(130)))
+                    LocalizationMcpServer.CopyAgentConfig();
+
+                using (new EditorGUI.DisabledScope(!running))
+                {
+                    if (GUILayout.Button(new GUIContent("Open Status Page", running ? "Open the server's status page in a browser" : "Start the server first"),
+                            EditorStyles.miniButtonRight, GUILayout.Width(130)))
+                        LocalizationMcpServer.OpenStatusPage();
+                }
+                GUILayout.FlexibleSpace();
             }
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(2);
+            GUILayout.Label(running
+                    ? "Agents connect to this address. Changes they make show up here after a reload."
+                    : "Start the server so AI agents can list, add and translate keys in this project.",
+                Styles.Description);
+
+            SectionGap();
+            Styles.DrawSectionTitle("Server Settings", ScopeMachine);
+
+            BeginRow("Start automatically");
+            {
+                bool autoStart = EditorGUILayout.Toggle(LocalizationMcpServer.AutoStart);
+                if (autoStart != LocalizationMcpServer.AutoStart)
+                    LocalizationMcpServer.AutoStart = autoStart;
+            }
+            EndRow();
+            Description("Starts the server when the editor opens.");
+
+            BeginRow("Port");
+            {
+                int port = LocalizationMcpServer.PortPrefValue;
+                int newPort = Mathf.Clamp(EditorGUILayout.DelayedIntField(port, GUILayout.Width(80)), 1, 65535);
+                if (newPort != port)
+                    LocalizationMcpServer.PortPrefValue = newPort;
+            }
+            EndRow();
+
+            if (running && LocalizationMcpServer.PortPrefValue != LocalizationMcpServer.Port)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(LabelWidth + 4f);
+                GUILayout.Label($"Still running on {LocalizationMcpServer.Port}. Restart to switch to {LocalizationMcpServer.PortPrefValue}; agents must reconnect.",
+                    Styles.WarningLabel);
+                if (GUILayout.Button("Restart Now", EditorStyles.miniButton, GUILayout.ExpandWidth(false)))
+                    LocalizationMcpServer.RestartFromMenu();
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+            }
+            else
+            {
+                Description("Local port the server listens on (127.0.0.1 only).");
+            }
+        }
+
+        #endregion
+
+        private static string UndoShortcut => Application.platform == RuntimePlatform.OSXEditor ? "Cmd+Z" : "Ctrl+Z";
+
+        private void CopyToClipboard(string text, string message)
+        {
+            EditorGUIUtility.systemCopyBuffer = text;
+            Editor.ShowNotification(new GUIContent(message));
         }
     }
 }

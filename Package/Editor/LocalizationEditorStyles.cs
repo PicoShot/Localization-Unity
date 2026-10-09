@@ -37,6 +37,7 @@ namespace PicoShot.Localization.Editor
         private static GUIStyle _textArea;
         private static GUIStyle _placeholder;
         private static GUIStyle _warningLabel;
+        private static GUIStyle _description;
         private static GUIStyle _centeredTitle;
         private static Texture2D _badgeTexture;
         private static bool _badgeTextureDark;
@@ -132,6 +133,23 @@ namespace PicoShot.Localization.Editor
                 };
                 _placeholder.normal.textColor = MutedText;
                 return _placeholder;
+            }
+        }
+
+        /// <summary>
+        /// Muted, word-wrapped description text for settings rows.
+        /// </summary>
+        public static GUIStyle Description
+        {
+            get
+            {
+                _description ??= new GUIStyle(EditorStyles.wordWrappedMiniLabel)
+                {
+                    alignment = TextAnchor.UpperLeft,
+                    padding = new RectOffset(2, 2, 0, 2)
+                };
+                _description.normal.textColor = MutedText;
+                return _description;
             }
         }
 

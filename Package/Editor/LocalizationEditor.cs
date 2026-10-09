@@ -645,9 +645,9 @@ namespace PicoShot.Localization
         /// <summary>
         /// Deletes all language data permanently.
         /// </summary>
-        public void PurgeAllData()
+        public void PurgeAllData(bool confirm = true)
         {
-            if (!EditorUtility.DisplayDialog("Purge All Data",
+            if (confirm && !EditorUtility.DisplayDialog("Purge All Data",
                     "Are you sure you want to delete all language data?\n\n" +
                     "This action cannot be undone!",
                     "Yes, Delete All", "Cancel")) return;
@@ -656,7 +656,6 @@ namespace PicoShot.Localization
             string defaultLang = config.DefaultLanguage;
 
             _data.Reset();
-            _data.LanguageCodes.Add(defaultLang);
 
             if (Directory.Exists(LocalizationManager.LanguagesPath))
             {
