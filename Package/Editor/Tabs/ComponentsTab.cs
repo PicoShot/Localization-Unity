@@ -401,15 +401,13 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private static string GetComponentTypeName(Component component)
         {
-            return component switch
-            {
-                TMP_Text => "TMP Text",
-                TMP_Dropdown => "TMP Dropdown",
-                Text => "Legacy Text",
-                Dropdown => "Legacy Dropdown",
-                TextMesh => "TextMesh",
-                _ => "Unknown"
-            };
+            var go = component.gameObject;
+            if (go.GetComponent<TMP_Dropdown>() != null) return "TMP Dropdown";
+            if (go.GetComponent<TMP_Text>() != null) return "TMP Text";
+            if (go.GetComponent<Dropdown>() != null) return "Legacy Dropdown";
+            if (go.GetComponent<Text>() != null) return "Legacy Text";
+            if (go.GetComponent<TextMesh>() != null) return "TextMesh";
+            return "Unknown";
         }
     }
 }
