@@ -26,7 +26,17 @@ namespace PicoShot.Localization.Editor.Data
     public sealed class LanguageEditorData
     {
         // State
-        public bool HasUnsavedChanges { get; set; }
+        public bool HasUnsavedChanges
+        {
+            get => _hasUnsavedChanges;
+            set
+            {
+                _hasUnsavedChanges = value;
+                MarkKeysChanged();
+            }
+        }
+
+        private bool _hasUnsavedChanges;
         public string SelectedKey { get; set; }
         public string SelectedView { get; set; } = "";
 
@@ -89,16 +99,27 @@ namespace PicoShot.Localization.Editor.Data
         public ViewDelimiter ActiveViewDelimiter
         {
             get => (ViewDelimiter)PlayerPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot);
-            set => PlayerPrefs.SetInt(ViewDelimiterPref, (int)value);
+            set
+            {
+                PlayerPrefs.SetInt(ViewDelimiterPref, (int)value);
+                _cachedViewDelimiter = DelimiterChar(value);
+            }
         }
 
         public char CurrentViewDelimiter => GetCurrentViewDelimiter();
 
+        private static char _cachedViewDelimiter;
+
         public static char GetCurrentViewDelimiter()
         {
-            return (ViewDelimiter)PlayerPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot) == ViewDelimiter.Underscore
-                ? '_'
-                : '.';
+            if (_cachedViewDelimiter == '\0')
+                _cachedViewDelimiter = DelimiterChar((ViewDelimiter)PlayerPrefs.GetInt(ViewDelimiterPref, (int)ViewDelimiter.Dot));
+            return _cachedViewDelimiter;
+        }
+
+        private static char DelimiterChar(ViewDelimiter delimiter)
+        {
+            return delimiter == ViewDelimiter.Underscore ? '_' : '.';
         }
 
         // DeepL Settings (stored in preferences, not this data)
@@ -165,49 +186,110 @@ namespace PicoShot.Localization.Editor.Data
         public const float MinKeysListWidth = 150f;
         public const float MaxKeysListWidthRatio = 0.5f;
 
+        private int _dataVersion;
+        private int _filteredVersion = -1;
+        private List<string> _filteredKeysSource;
+        private string _filteredSearch;
+        private string _filteredView;
+        private char _filteredDelimiter;
+        private bool _filteredArraysOnly;
+        private bool _filteredStringsOnly;
+        private bool _filteredSorted;
+        private readonly List<string> _filteredKeys = new();
+
+        private int _viewsVersion = -1;
+        private List<string> _viewsSource;
+        private char _viewsDelimiter;
+        private readonly List<string> _views = new();
+
+        public void MarkKeysChanged()
+        {
+            _dataVersion++;
+        }
+
         /// <summary>
         /// Gets all keys filtered by current search and type filters.
+        /// The returned list is cached; copy it before modifying <see cref="Keys"/> while iterating.
         /// </summary>
-        public IEnumerable<string> GetFilteredKeys()
+        public IReadOnlyList<string> GetFilteredKeys()
         {
-            string lowercaseFilter = KeySearchFilter?.ToLower() ?? "";
-            bool hasFilter = !string.IsNullOrEmpty(lowercaseFilter);
+            string search = KeySearchFilter ?? string.Empty;
+            string view = SelectedView ?? string.Empty;
+            char delimiter = CurrentViewDelimiter;
 
-            var query = Keys.AsEnumerable();
-
-            // Filter by view first (case-insensitive)
-            if (!string.IsNullOrEmpty(SelectedView))
+            if (_filteredVersion == _dataVersion &&
+                ReferenceEquals(_filteredKeysSource, Keys) &&
+                _filteredSearch == search &&
+                _filteredView == view &&
+                _filteredDelimiter == delimiter &&
+                _filteredArraysOnly == ShowArrayKeysOnly &&
+                _filteredStringsOnly == ShowStringKeysOnly &&
+                _filteredSorted == SortKeysByName)
             {
-                string viewPrefix = SelectedView + CurrentViewDelimiter;
-                query = query.Where(key => key.StartsWith(viewPrefix, StringComparison.OrdinalIgnoreCase));
+                return _filteredKeys;
             }
 
-            if (hasFilter)
-                query = query.Where(key => key.ToLower().Contains(lowercaseFilter));
+            _filteredKeys.Clear();
+            string viewPrefix = view.Length > 0 ? view + delimiter : null;
 
-            if (ShowArrayKeysOnly)
-                query = query.Where(key => IsArrayKey(LanguageData[key]));
-            else if (ShowStringKeysOnly)
-                query = query.Where(key => !IsArrayKey(LanguageData[key]));
+            foreach (var key in Keys)
+            {
+                if (viewPrefix != null && !key.StartsWith(viewPrefix, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (search.Length > 0 && key.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0)
+                    continue;
+
+                if (ShowArrayKeysOnly && !IsArrayKey(LanguageData[key]))
+                    continue;
+
+                if (!ShowArrayKeysOnly && ShowStringKeysOnly && IsArrayKey(LanguageData[key]))
+                    continue;
+
+                _filteredKeys.Add(key);
+            }
 
             if (SortKeysByName)
-                query = query.OrderBy(key => key);
+                _filteredKeys.Sort(StringComparer.CurrentCulture);
 
-            return query;
+            _filteredVersion = _dataVersion;
+            _filteredKeysSource = Keys;
+            _filteredSearch = search;
+            _filteredView = view;
+            _filteredDelimiter = delimiter;
+            _filteredArraysOnly = ShowArrayKeysOnly;
+            _filteredStringsOnly = ShowStringKeysOnly;
+            _filteredSorted = SortKeysByName;
+            return _filteredKeys;
         }
 
         /// <summary>
         /// Gets all unique views from existing keys (case-insensitive, preserving first-seen casing).
+        /// The returned list is cached.
         /// </summary>
-        public IEnumerable<string> GetViews()
+        public IReadOnlyList<string> GetViews()
         {
+            char delimiter = CurrentViewDelimiter;
+            if (_viewsVersion == _dataVersion && ReferenceEquals(_viewsSource, Keys) && _viewsDelimiter == delimiter)
+                return _views;
+
+            _views.Clear();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var key in Keys.Where(k => k.Contains(CurrentViewDelimiter)))
+            foreach (var key in Keys)
             {
-                string view = key.Substring(0, key.IndexOf(CurrentViewDelimiter));
+                int delimiterIndex = key.IndexOf(delimiter);
+                if (delimiterIndex < 0)
+                    continue;
+
+                string view = key.Substring(0, delimiterIndex);
                 if (seen.Add(view))
-                    yield return view;
+                    _views.Add(view);
             }
+
+            _viewsVersion = _dataVersion;
+            _viewsSource = Keys;
+            _viewsDelimiter = delimiter;
+            return _views;
         }
 
         /// <summary>
@@ -388,15 +470,15 @@ namespace PicoShot.Localization.Editor.Data
         public void RemoveView(string view)
         {
             if (string.IsNullOrEmpty(view)) return;
-            
+
             string prefix = view + CurrentViewDelimiter;
             var keysToRemove = Keys.Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)).ToList();
-            
+
             foreach (var k in keysToRemove)
             {
                 RemoveKey(k);
             }
-            
+
             if (SelectedView == view)
             {
                 SelectedView = "";

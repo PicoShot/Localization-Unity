@@ -181,7 +181,7 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.EndHorizontal();
 
             var totalKeys = Data.Keys.Count;
-            var filteredCount = Data.GetFilteredKeys().Count();
+            var filteredCount = Data.GetFilteredKeys().Count;
             EditorGUILayout.BeginHorizontal();
             EditorGUILayout.LabelField("Found:", GUILayout.Width(80));
             EditorGUILayout.LabelField($"{filteredCount} / {totalKeys} keys", EditorStyles.boldLabel);
@@ -199,7 +199,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 GUILayout.MaxHeight(float.MaxValue));
             EditorGUILayout.LabelField("Keys", EditorStyles.boldLabel);
 
-            var filteredKeys = Data.GetFilteredKeys().ToList();
+            var filteredKeys = Data.GetFilteredKeys();
             int totalKeyCount = filteredKeys.Count;
 
             Rect scrollViewRect = GUILayoutUtility.GetRect(
