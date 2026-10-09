@@ -29,31 +29,6 @@ namespace PicoShot.Localization.Editor.Tabs
         public virtual bool HandleKeyboardInput(Event evt) => false;
 
         /// <summary>
-        /// Helper to draw a section header with consistent styling.
-        /// </summary>
-        protected static void DrawSectionHeader(string title)
-        {
-            EditorGUILayout.Space(5);
-            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
-        }
-
-        /// <summary>
-        /// Helper to draw a box container.
-        /// </summary>
-        protected static EditorGUILayout.VerticalScope BeginBox()
-        {
-            return new EditorGUILayout.VerticalScope("box");
-        }
-
-        /// <summary>
-        /// Helper to draw a help box with a message.
-        /// </summary>
-        protected static void DrawHelpBox(string message, MessageType type = MessageType.None)
-        {
-            EditorGUILayout.HelpBox(message, type);
-        }
-
-        /// <summary>
         /// Helper to get the window position.
         /// </summary>
         protected Rect WindowPosition => Editor.position;

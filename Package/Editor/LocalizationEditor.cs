@@ -7,6 +7,7 @@ using UnityEditor.Compilation;
 using UnityEngine;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
+using PicoShot.Localization.Editor;
 using PicoShot.Localization.Editor.Data;
 using PicoShot.Localization.Editor.Services;
 using PicoShot.Localization.Editor.Tabs;
@@ -41,7 +42,7 @@ namespace PicoShot.Localization
         [MenuItem("Tools/Localization/Language Editor")]
         public static void OpenWindow()
         {
-            GetWindow<LocalizationEditor>("Language Editor");
+            GetWindow<LocalizationEditor>("Localization");
         }
 
         private void OnEnable()
@@ -72,7 +73,7 @@ namespace PicoShot.Localization
             if (_data == null) return;
             if (_data.HasUnsavedChanges)
             {
-                ShowNotification(new GUIContent("MCP server changed locale files on disk. Reopen the editor to load them (saving now would overwrite)."));
+                ShowNotification(new GUIContent("The MCP server changed the locale files. Use ☰ > Reload from Disk to load them (saving now would overwrite them)."));
                 return;
             }
             LoadLanguages(out _);
@@ -120,64 +121,166 @@ namespace PicoShot.Localization
         private void OnGUI()
         {
             HandleKeyboardInput();
+            UpdateTitle();
 
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             {
-                DrawHeader();
                 DrawTabs();
-
-                EditorGUILayout.Space();
+                EditorGUILayout.Space(4);
 
                 if (_tabs.TryGetValue(_currentTab, out var tab))
                 {
                     tab.Draw();
                 }
 
-                EditorGUILayout.Space();
-                DrawSaveButton();
+                DrawStatusBar();
             }
             EditorGUILayout.EndVertical();
         }
 
         #endregion
 
-        #region UI Components
+        #region Window Frame
 
-        private static void DrawHeader()
+        private static readonly EditorTab[] TabOrder = (EditorTab[])Enum.GetValues(typeof(EditorTab));
+        private static GUIStyle _saveButtonStyle;
+        private DateTime? _lastSaved;
+        private bool _titleDirty;
+        private bool _titleInitialized;
+
+        private static string ActionKeyName => Application.platform == RuntimePlatform.OSXEditor ? "Cmd" : "Ctrl";
+
+        /// <summary>
+        /// Window title gets a trailing * while there are unsaved changes, like Unity's scene tabs.
+        /// </summary>
+        private void UpdateTitle()
         {
-            EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Language Manager", EditorStyles.boldLabel);
-            EditorGUILayout.Space();
+            bool dirty = _data.HasUnsavedChanges;
+            if (_titleInitialized && dirty == _titleDirty)
+                return;
+
+            _titleInitialized = true;
+            _titleDirty = dirty;
+            var icon = EditorGUIUtility.IconContent("Font Icon").image;
+            titleContent = new GUIContent(dirty ? "Localization*" : "Localization", icon,
+                dirty ? "Localization (unsaved changes)" : "Localization");
         }
 
         private void DrawTabs()
         {
+            EditorGUILayout.Space(6);
             EditorGUILayout.BeginHorizontal();
 
-            foreach (EditorTab tab in Enum.GetValues(typeof(EditorTab)))
+            foreach (var tab in TabOrder)
             {
-                bool isActive = _currentTab == tab;
-                GUI.backgroundColor = isActive ? Color.gray : Color.white;
-
+                GUI.backgroundColor = _currentTab == tab ? Color.gray : Color.white;
                 if (GUILayout.Button(GetTabDisplayName(tab), EditorStyles.toolbarButton))
-                {
                     SwitchToTab(tab);
-                }
             }
 
             GUI.backgroundColor = Color.white;
             EditorGUILayout.EndHorizontal();
         }
 
-        private void DrawSaveButton()
+        private void ShowWindowMenu(Rect rect)
         {
-            EditorGUILayout.Space();
-            GUI.backgroundColor = _data.HasUnsavedChanges ? Color.red : Color.white;
-            if (GUILayout.Button("Save Changes", GUILayout.Height(30)))
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent("Reload from Disk"), false, ReloadFromDisk);
+            menu.AddItem(new GUIContent("Open Locale Folder"), false, () =>
             {
-                SaveLanguages();
+                string path = LocalizationManager.LanguagesPath;
+                if (!Directory.Exists(path))
+                    Directory.CreateDirectory(path);
+                string fullPath = Path.GetFullPath(path).Replace('\\', '/');
+                Application.OpenURL((fullPath.StartsWith("/") ? "file://" : "file:///") + fullPath);
+            });
+            menu.DropDown(rect);
+        }
+
+        /// <summary>
+        /// Loads the locale files again, for example after the MCP server or version control changed them.
+        /// </summary>
+        private void ReloadFromDisk()
+        {
+            if (_data.HasUnsavedChanges && !EditorUtility.DisplayDialog("Reload from Disk",
+                    "You have unsaved changes. Reloading replaces them with what's in the locale files.", "Discard and Reload", "Cancel"))
+                return;
+
+            LoadLanguages(out _);
+            GUIUtility.keyboardControl = 0;
+            ShowNotification(new GUIContent("Reloaded locale files"));
+            Repaint();
+        }
+
+        private void DrawStatusBar()
+        {
+            var rect = GUILayoutUtility.GetRect(0f, 22f, GUILayout.ExpandWidth(true));
+            if (Event.current.type == EventType.Repaint)
+            {
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, rect.width, 1f), LocalizationEditorStyles.Separator);
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y + 1f, rect.width, rect.height - 1f), LocalizationEditorStyles.RowEven);
             }
-            GUI.backgroundColor = Color.white;
+
+            var content = new Rect(rect.x + 6f, rect.y + 1f, rect.width - 12f, rect.height - 1f);
+            float x = content.x;
+
+            if (_data.HasUnsavedChanges)
+            {
+                if (Event.current.type == EventType.Repaint)
+                    EditorGUI.DrawRect(new Rect(x, content.center.y - 3f, 6f, 6f), LocalizationEditorStyles.Warning);
+                x += 12f;
+                GUI.Label(new Rect(x, content.y, 260f, content.height),
+                    new GUIContent($"Unsaved changes · {ActionKeyName}+S to save"), LocalizationEditorStyles.MutedLabel);
+            }
+            else
+            {
+                string saved = _lastSaved.HasValue ? $"Saved {FormatAge(DateTime.Now - _lastSaved.Value)}" : "All changes saved";
+                GUI.Label(new Rect(x, content.y, 260f, content.height), saved, LocalizationEditorStyles.MutedLabel);
+            }
+
+            float right = content.xMax;
+
+            var menuRect = new Rect(right - 22f, content.y + 1f, 22f, content.height - 2f);
+            if (GUI.Button(menuRect, EditorGUIUtility.IconContent("_Menu"), EditorStyles.iconButton))
+                ShowWindowMenu(menuRect);
+            right = menuRect.x - 4f;
+
+            bool dirty = _data.HasUnsavedChanges;
+            _saveButtonStyle ??= new GUIStyle(EditorStyles.miniButton) { fontStyle = FontStyle.Bold };
+            var saveRect = new Rect(right - 64f, content.y + 2f, 64f, content.height - 4f);
+            using (new EditorGUI.DisabledScope(!dirty))
+            {
+                var saveContent = new GUIContent(dirty ? "Save" : "Saved",
+                    dirty ? $"Write all changes to the locale files ({ActionKeyName}+S)" : "Everything is saved");
+                if (GUI.Button(saveRect, saveContent, dirty ? _saveButtonStyle : EditorStyles.miniButton))
+                {
+                    SaveLanguages();
+                    GUIUtility.ExitGUI();
+                }
+            }
+            right = saveRect.x - 10f;
+
+            if (Editor.Mcp.LocalizationMcpServer.IsRunning)
+            {
+                float w = LocalizationEditorStyles.GetBadgeWidth("MCP");
+                LocalizationEditorStyles.DrawBadge(new Rect(right - w, content.y, w, content.height), "MCP", LocalizationEditorStyles.Success,
+                    $"MCP server running at {Editor.Mcp.LocalizationMcpServer.Url}");
+                right -= w + 8f;
+            }
+
+            int languages = _data.LanguageCodes.Count;
+            int keys = _data.Keys.Count;
+            string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
+            GUI.Label(new Rect(x + 260f, content.y, Mathf.Max(0f, right - x - 260f), content.height),
+                new GUIContent($"{languages} {(languages == 1 ? "language" : "languages")} · {keys:N0} {(keys == 1 ? "key" : "keys")} · source {defaultLang}"),
+                LocalizationEditorStyles.MutedLabelRight);
+        }
+
+        private static string FormatAge(TimeSpan age)
+        {
+            if (age.TotalSeconds < 60) return "just now";
+            if (age.TotalMinutes < 60) return $"{(int)age.TotalMinutes} min ago";
+            return $"at {DateTime.Now - age:HH:mm}";
         }
 
         #endregion
@@ -282,16 +385,15 @@ namespace PicoShot.Localization
         private void HandleKeyboardInput()
         {
             if (Event.current.type != EventType.KeyDown) return;
-            if (GUIUtility.keyboardControl != 0) return;
 
-            bool ctrlPressed = (Event.current.modifiers & EventModifiers.Control) != 0;
-
-            if (ctrlPressed && Event.current.keyCode == KeyCode.S)
+            if (EditorGUI.actionKey && Event.current.keyCode == KeyCode.S)
             {
                 SaveLanguages();
                 Event.current.Use();
                 return;
             }
+
+            if (GUIUtility.keyboardControl != 0) return;
 
             if (_tabs.TryGetValue(_currentTab, out var tab))
             {
@@ -589,7 +691,8 @@ namespace PicoShot.Localization
                 LocaleHashSync.SyncIfEnabled("save");
 
                 _data.HasUnsavedChanges = false;
-                ShowNotification(new GUIContent("Language data saved successfully!"));
+                _lastSaved = DateTime.Now;
+                ShowNotification(new GUIContent("Saved"));
 
                 if (LocalizationManager.IsInitialized)
                 {

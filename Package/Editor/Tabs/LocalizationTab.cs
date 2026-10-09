@@ -67,7 +67,6 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             {
-                DrawSectionHeader("Localization");
                 DrawSubTabToolbar();
 
                 EditorGUILayout.Space(5);

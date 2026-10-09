@@ -94,7 +94,6 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
             {
-                DrawSectionHeader("Tools");
 
                 EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
                 int selected = GUILayout.Toolbar((int)_activeSubTab, SubTabNames, EditorStyles.toolbarButton);
