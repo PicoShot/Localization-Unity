@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using PicoShot.Localization.Bloc;
 using PicoShot.Localization.Hashing;
 using UnityEngine;
 
@@ -48,12 +49,41 @@ namespace PicoShot.Localization
             }
         }
 
-        /// <summary>
-        /// Sorts the parallel arrays by hash and drops entries whose hash is already taken.
-        /// Keys are case-insensitive, so "Play" and "play" (or a 64-bit hash collision) would
-        /// otherwise make one of them silently unreachable, chosen arbitrarily by the sort.
-        /// The entry that appears first in the source wins, and the conflict is logged.
-        /// </summary>
+        internal LanguageDictionary(IBlocEntry[] entries)
+        {
+            int count = 0;
+            keys = new string[entries.Length];
+            keyHashes = new long[entries.Length];
+            values = new object[entries.Length];
+
+            foreach (var entry in entries)
+            {
+                switch (entry)
+                {
+                    case StringEntry stringEntry:
+                        values[count] = stringEntry.Value;
+                        break;
+                    case ArrayEntry arrayEntry:
+                        values[count] = new List<string>(arrayEntry.Values);
+                        break;
+                    default:
+                        continue;
+                }
+
+                keys[count] = entry.Key;
+                keyHashes[count] = Hash64.CreateIgnoreCase(entry.Key);
+                count++;
+            }
+
+            Count = SortAndRemoveDuplicates(keyHashes, keys, values, count);
+            if (Count < entries.Length)
+            {
+                Array.Resize(ref keyHashes, Count);
+                Array.Resize(ref keys, Count);
+                Array.Resize(ref values, Count);
+            }
+        }
+
         private static int SortAndRemoveDuplicates(long[] hashes, string[] keys, object[] values, int count)
         {
             if (count <= 1)
@@ -61,7 +91,8 @@ namespace PicoShot.Localization
 
             var order = new int[count];
             for (int i = 0; i < count; i++) order[i] = i;
-            var sortKeys = (long[])hashes.Clone();
+            var sortKeys = new long[count];
+            Array.Copy(hashes, sortKeys, count);
             Array.Sort(sortKeys, order);
             for (int start = 0; start < count;)
             {
@@ -163,4 +194,4 @@ namespace PicoShot.Localization
         public bool ContainsKey(string key) =>
             ContainsKey(Hash64.CreateIgnoreCase(key));
     }
-}
+}

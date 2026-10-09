@@ -1,5 +1,6 @@
 using System;
 using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
@@ -281,29 +282,26 @@ namespace PicoShot.Localization.Bloc
                 if (footer.contentCRC != ComputeCrc32(contentSpan))
                     throw new FileLoadException("File damaged (CRC mismatch)");
 
-                using var contentStream = new MemoryStream(contentData, 0, contentSpan.Length);
-                using var contentReader = new BinaryReader(contentStream);
-
-                contentStream.Position = header.strings.offset;
+                int position = (int)header.strings.offset;
                 var stringPool = new string[header.strings.count];
-                for (int i = 0; i < header.strings.count; i++)
+                for (int i = 0; i < stringPool.Length; i++)
                 {
-                    uint length = ReadVarInt(contentReader);
-                    if (length > contentSize - contentStream.Position)
+                    uint length = ReadVarInt(contentSpan, ref position);
+                    if (length > (uint)(contentSize - position))
                         throw new InvalidDataException($"Invalid string length: {length}");
 
-                    byte[] bytes = contentReader.ReadBytes((int)length);
-                    stringPool[i] = Encoding.UTF8.GetString(bytes);
+                    stringPool[i] = Encoding.UTF8.GetString(contentData, position, (int)length);
+                    position += (int)length;
                 }
 
                 info.EntryCount = header.entries.count;
 
-                contentStream.Position = header.entries.offset;
+                position = (int)header.entries.offset;
                 entries = new IBlocEntry[header.entries.count];
-                for (int i = 0; i < header.entries.count; i++)
+                for (int i = 0; i < entries.Length; i++)
                 {
-                    uint keyId = contentReader.ReadUInt32();
-                    uint valueRef = contentReader.ReadUInt32();
+                    uint keyId = ReadUInt32(contentSpan, ref position);
+                    uint valueRef = ReadUInt32(contentSpan, ref position);
 
                     string key = stringPool[keyId];
 
@@ -314,7 +312,7 @@ namespace PicoShot.Localization.Bloc
 
                         for (int j = 0; j < count; j++)
                         {
-                            uint itemId = contentReader.ReadUInt32();
+                            uint itemId = ReadUInt32(contentSpan, ref position);
                             values[j] = stringPool[itemId];
                         }
 
@@ -339,6 +337,30 @@ namespace PicoShot.Localization.Bloc
                 ArrayPool<byte>.Shared.Return(contentData);
             }
         }
+        private static uint ReadUInt32(ReadOnlySpan<byte> data, ref int position)
+        {
+            uint value = BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(position, 4));
+            position += 4;
+            return value;
+        }
+
+        private static uint ReadVarInt(ReadOnlySpan<byte> data, ref int position)
+        {
+            uint result = 0;
+            int shift = 0;
+            byte b;
+            do
+            {
+                if (shift > 28)
+                    throw new InvalidDataException("Invalid varint");
+
+                b = data[position++];
+                result |= (uint)(b & 0x7F) << shift;
+                shift += 7;
+            } while ((b & 0x80) != 0);
+            return result;
+        }
+
         public static Header ReadHeader(BinaryReader reader)
         {
             if (!EnsureLength(reader, HEADER_SIZE))

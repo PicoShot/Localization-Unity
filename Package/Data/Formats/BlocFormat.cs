@@ -73,10 +73,9 @@ namespace PicoShot.Localization.Bloc
 
             formatLayout.serializer(writer, entries, localeData.LanguageCode, compressionLevel);
         }
-        public static LocaleData Deserialize(Stream stream, out BlocInfo info)
-        {
-            info = default;
 
+        public static IBlocEntry[] DeserializeEntries(Stream stream, out BlocInfo info)
+        {
             if (!stream.CanRead)
                 throw new InvalidOperationException("Cant read from this stream");
 
@@ -94,6 +93,13 @@ namespace PicoShot.Localization.Bloc
                 throw new InvalidDataException($"Not found version:`{version}` in defined formats");
 
             formatLayout.deserializer(reader, out var entries, out info);
+            return entries;
+        }
+
+        public static LocaleData Deserialize(Stream stream, out BlocInfo info)
+        {
+            var entries = DeserializeEntries(stream, out info);
+            ushort version = info.Version;
             var translations = new Dictionary<string, object>((int)info.EntryCount);
 
             for (int i = 0; i < entries.Length; i++)

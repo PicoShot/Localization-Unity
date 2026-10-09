@@ -511,32 +511,21 @@ namespace PicoShot.Localization
                 throw new FileNotFoundException($"Locale file not found for language '{languageCode}'", filePath);
             }
 
-            LocaleData localeData;
+            byte[] bytes = File.ReadAllBytes(filePath);
+
             var config = LocalizationConfigProvider.Config;
             if (config.IsAntiTamperEnabled)
             {
-                byte[] bytes = File.ReadAllBytes(filePath);
                 string fileName = Path.GetFileName(filePath);
                 if (!config.TryGetFileHash(fileName, out string expectedHash) ||
                     !string.Equals(expectedHash, CalculateHash(bytes), StringComparison.OrdinalIgnoreCase))
                 {
                     throw new InvalidDataException($"File tampering detected: {fileName}");
                 }
-
-                using var stream = new MemoryStream(bytes, writable: false);
-                localeData = BlocFormat.Deserialize(stream, out _);
-            }
-            else
-            {
-                localeData = LocaleBlocSerializer.LoadFile(filePath, out _);
             }
 
-            if (localeData?.Translations == null)
-            {
-                return new LanguageDictionary(new Dictionary<string, object>());
-            }
-
-            return new LanguageDictionary(localeData.Translations);
+            using var stream = new MemoryStream(bytes, writable: false);
+            return new LanguageDictionary(BlocFormat.DeserializeEntries(stream, out _));
         }
 
         private static string GetLocaleFilePath(string languageCode)
