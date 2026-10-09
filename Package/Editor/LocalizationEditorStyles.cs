@@ -13,6 +13,7 @@ namespace PicoShot.Localization.Editor
         public static Color RowEven => IsDark ? new Color(1f, 1f, 1f, 0.025f) : new Color(0f, 0f, 0f, 0.03f);
         public static Color RowOdd => Color.clear;
         public static Color RowHover => IsDark ? new Color(1f, 1f, 1f, 0.06f) : new Color(0f, 0f, 0f, 0.07f);
+        public static Color RowSelected => IsDark ? new Color(0.24f, 0.48f, 0.90f, 0.22f) : new Color(0.17f, 0.42f, 0.85f, 0.16f);
         public static Color Separator => IsDark ? new Color(0f, 0f, 0f, 0.35f) : new Color(0f, 0f, 0f, 0.18f);
         public static Color Accent => IsDark ? new Color(0.30f, 0.56f, 0.95f) : new Color(0.17f, 0.42f, 0.85f);
         public static Color Success => IsDark ? new Color(0.35f, 0.72f, 0.38f) : new Color(0.20f, 0.58f, 0.25f);
@@ -31,6 +32,7 @@ namespace PicoShot.Localization.Editor
         private static GUIStyle _progressText;
         private static GUIStyle _sectionTitle;
         private static GUIStyle _emptyState;
+        private static GUIStyle _inheritedField;
         private static Texture2D _badgeTexture;
         private static bool _badgeTextureDark;
 
@@ -87,6 +89,27 @@ namespace PicoShot.Localization.Editor
                 };
                 _emptyState.normal.textColor = MutedText;
                 return _emptyState;
+            }
+        }
+
+        /// <summary>
+        /// Object field look-alike for values inherited from a default.
+        /// </summary>
+        public static GUIStyle InheritedField
+        {
+            get
+            {
+                _inheritedField ??= new GUIStyle(EditorStyles.objectField)
+                {
+                    fontStyle = FontStyle.Italic,
+                    padding = new RectOffset(4, 4, EditorStyles.objectField.padding.top, EditorStyles.objectField.padding.bottom),
+                    clipping = TextClipping.Clip,
+                    imagePosition = ImagePosition.TextOnly
+                };
+                _inheritedField.normal.textColor = MutedText;
+                _inheritedField.hover.textColor = MutedText;
+                _inheritedField.focused.textColor = MutedText;
+                return _inheritedField;
             }
         }
 
@@ -189,6 +212,30 @@ namespace PicoShot.Localization.Editor
             if (!string.IsNullOrEmpty(caption))
                 GUI.Label(rect, caption, MutedLabelRight);
             DrawSeparator(0f, 2f);
+        }
+
+        /// <summary>
+        /// Draws a list row background, highlighting it when selected.
+        /// </summary>
+        public static void DrawRowBackground(Rect rect, int index, bool hover, bool selected)
+        {
+            DrawRowBackground(rect, index, hover && !selected);
+            if (selected && Event.current.type == EventType.Repaint)
+                EditorGUI.DrawRect(rect, RowSelected);
+        }
+
+        /// <summary>
+        /// Reserves a section title row and returns the rect to the right of the title for extra controls.
+        /// </summary>
+        public static Rect DrawSectionTitleWithControls(string title)
+        {
+            var rect = GUILayoutUtility.GetRect(0f, 22f, GUILayout.ExpandWidth(true));
+            var titleContent = new GUIContent(title);
+            GUI.Label(rect, titleContent, SectionTitle);
+            DrawSeparator(0f, 2f);
+
+            float titleWidth = SectionTitle.CalcSize(titleContent).x + 8f;
+            return new Rect(rect.x + titleWidth, rect.y, Mathf.Max(0f, rect.width - titleWidth), rect.height);
         }
 
         /// <summary>

@@ -16,7 +16,7 @@ namespace PicoShot.Localization.Editor.Tabs
     /// <summary>
     /// Tab for managing project languages and language-specific fonts.
     /// </summary>
-    public sealed class LocalizationTab : LocalizationEditorTabBase
+    public sealed partial class LocalizationTab : LocalizationEditorTabBase
     {
         private enum LocalizationSubTab
         {
@@ -26,8 +26,6 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private static readonly string[] SubTabNames = { "Languages", "Fonts" };
         private LocalizationSubTab _activeSubTab = LocalizationSubTab.Languages;
-
-        private Vector2 _fontsScrollPos;
 
         private static readonly HashSet<string> CommonLanguages = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -80,10 +78,7 @@ namespace PicoShot.Localization.Editor.Tabs
                         DrawLanguagesSubTab();
                         break;
                     case LocalizationSubTab.Fonts:
-                        using (BeginBox())
-                        {
-                            DrawFontsSubTab();
-                        }
+                        DrawFontsSubTab();
                         break;
                 }
             }
@@ -157,10 +152,7 @@ namespace PicoShot.Localization.Editor.Tabs
             Styles.DrawSectionTitle("Project Languages", count == 1 ? "1 language" : $"{count} languages");
 
             string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
-            var languages = Data.LanguageCodes
-                .OrderByDescending(code => string.Equals(code, defaultLang, StringComparison.OrdinalIgnoreCase))
-                .ThenBy(code => LanguageDefinitions.GetDisplayName(code), StringComparer.CurrentCulture)
-                .ToList();
+            var languages = GetOrderedProjectLanguages(defaultLang);
 
             for (int i = 0; i < languages.Count; i++)
             {
@@ -172,6 +164,17 @@ namespace PicoShot.Localization.Editor.Tabs
                 GUILayout.Label("Only the default language is set up. Add the languages you want to ship from the list below.",
                     Styles.EmptyState);
             }
+        }
+
+        /// <summary>
+        /// Project languages with the default first, then by name.
+        /// </summary>
+        private List<string> GetOrderedProjectLanguages(string defaultLang)
+        {
+            return Data.LanguageCodes
+                .OrderByDescending(code => string.Equals(code, defaultLang, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(code => LanguageDefinitions.GetDisplayName(code), StringComparer.CurrentCulture)
+                .ToList();
         }
 
         private void DrawProjectLanguageRow(string code, int index, string defaultLang)
@@ -602,130 +605,6 @@ namespace PicoShot.Localization.Editor.Tabs
                     "Removed languages keep their files until you save"), Styles.MutedLabelRight);
             }
             EditorGUILayout.EndHorizontal();
-        }
-
-        #endregion
-
-        #region Fonts Sub-Tab
-
-        private void DrawFontsSubTab()
-        {
-            var config = LocalizationConfigProvider.Config;
-
-            if (!config.IsFontSystemEnabled)
-            {
-                DrawDisabledFontState(config);
-                return;
-            }
-
-            _fontsScrollPos = EditorGUILayout.BeginScrollView(_fontsScrollPos, GUILayout.ExpandHeight(true));
-
-            DrawSectionHeader("Font System");
-
-            EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Disable Font System", GUILayout.Width(150)))
-            {
-                config.SetFontSystemEnabled(false);
-                LocalizationConfigProvider.SaveConfig();
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.Space();
-            DrawDefaultFontsSection(config);
-
-            EditorGUILayout.Space();
-            DrawLanguageFontsSection(config);
-
-            EditorGUILayout.EndScrollView();
-        }
-
-        private void DrawDisabledFontState(LocalizationConfig config)
-        {
-            GUILayout.FlexibleSpace();
-
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-
-            EditorGUILayout.BeginVertical(GUILayout.Width(300));
-            EditorGUILayout.LabelField("Language-Specific Fonts", EditorStyles.boldLabel, GUILayout.Height(30));
-            EditorGUILayout.HelpBox("The Font System is currently disabled. Enable it to assign specific fonts to different languages, which will automatically update UI text components when the language changes.", MessageType.None);
-
-            EditorGUILayout.Space();
-
-            GUI.backgroundColor = new Color(0.2f, 0.8f, 0.2f);
-            if (GUILayout.Button("Enable Font System", GUILayout.Height(40)))
-            {
-                config.SetFontSystemEnabled(true);
-                LocalizationConfigProvider.SaveConfig();
-            }
-            GUI.backgroundColor = Color.white;
-
-            EditorGUILayout.EndVertical();
-
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-
-            GUILayout.FlexibleSpace();
-        }
-
-        private void DrawDefaultFontsSection(LocalizationConfig config)
-        {
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Default Fonts (Fallback)", EditorStyles.boldLabel);
-            EditorGUILayout.HelpBox("These fonts will be used if a specific language does not have an override.", MessageType.None);
-
-            EditorGUI.BeginChangeCheck();
-
-            var newTMP = (TMP_FontAsset)EditorGUILayout.ObjectField("Default TMP Font", config.DefaultTMPFont, typeof(TMP_FontAsset), false);
-            var newLegacy = (Font)EditorGUILayout.ObjectField("Default Legacy Font", config.DefaultLegacyFont, typeof(Font), false);
-
-            if (EditorGUI.EndChangeCheck())
-            {
-                config.SetDefaultFonts(newTMP, newLegacy);
-                LocalizationConfigProvider.SaveConfig();
-            }
-
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawLanguageFontsSection(LocalizationConfig config)
-        {
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Language Overrides", EditorStyles.boldLabel);
-
-            var activeLanguages = Data.LanguageCodes;
-
-            if (activeLanguages.Count == 0)
-            {
-                EditorGUILayout.HelpBox("No languages found. Add languages in the Languages sub-tab.", MessageType.Warning);
-                EditorGUILayout.EndVertical();
-                return;
-            }
-
-            var mappings = config.FontMappings.ToList();
-
-            foreach (var langCode in activeLanguages)
-            {
-                EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField($"Language: {langCode}", EditorStyles.boldLabel);
-
-                var mapping = mappings.FirstOrDefault(m => m.languageCode.Equals(langCode, StringComparison.OrdinalIgnoreCase));
-
-                EditorGUI.BeginChangeCheck();
-
-                var newTMP = (TMP_FontAsset)EditorGUILayout.ObjectField("TMP Font", mapping.tmpFont, typeof(TMP_FontAsset), false);
-                var newLegacy = (Font)EditorGUILayout.ObjectField("Legacy Font", mapping.legacyFont, typeof(Font), false);
-
-                if (EditorGUI.EndChangeCheck())
-                {
-                    config.SetFontMapping(langCode, newTMP, newLegacy);
-                    LocalizationConfigProvider.SaveConfig();
-                }
-
-                EditorGUILayout.EndVertical();
-            }
-
-            EditorGUILayout.EndVertical();
         }
 
         #endregion
