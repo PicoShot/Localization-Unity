@@ -153,6 +153,37 @@ namespace PicoShot.Localization.Bloc
             }
         }
 
+        public static bool ReadInfo(Stream stream, out ushort version, out string languageCode)
+        {
+            version = 0;
+            languageCode = null;
+
+            try
+            {
+                if (!stream.CanRead || stream.Length < FILE_MIN_SIZE)
+                    return false;
+
+                using var reader = new BinaryReader(stream, Encoding.UTF8, true);
+
+                if (!ValidateMagicAndVersion(reader, out version))
+                    return false;
+
+                stream.Position = MAGIC_AND_VERSION_SIZE;
+
+                if (!FindFormatLayout(version, out var formatLayout))
+                    return false;
+
+                return formatLayout.infoReader != null
+                    ? formatLayout.infoReader(reader, out languageCode)
+                    : formatLayout.validator(reader, out languageCode);
+            }
+            catch (Exception)
+            {
+                languageCode = null;
+                return false;
+            }
+        }
+
         public static void Upgrade(Stream source, Stream destination, ushort destinationVersion, CompressionLevel compressionLevel)
         {
             if (!source.CanRead)
@@ -294,13 +325,20 @@ namespace PicoShot.Localization.Bloc
         public BlocFormat.ValidateMethod validator;
         public BlocFormat.SerializeMethod serializer;
         public BlocFormat.DeserializeMethod deserializer;
+        public BlocFormat.ValidateMethod infoReader;
 
         public BlocFormatLayout(ushort version, BlocFormat.ValidateMethod validator, BlocFormat.SerializeMethod serializer, BlocFormat.DeserializeMethod deserializer)
+            : this(version, validator, serializer, deserializer, null)
+        {
+        }
+
+        public BlocFormatLayout(ushort version, BlocFormat.ValidateMethod validator, BlocFormat.SerializeMethod serializer, BlocFormat.DeserializeMethod deserializer, BlocFormat.ValidateMethod infoReader)
         {
             this.version = version;
             this.validator = validator;
             this.serializer = serializer;
             this.deserializer = deserializer;
+            this.infoReader = infoReader;
         }
     }
 

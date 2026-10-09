@@ -47,36 +47,48 @@ namespace PicoShot.Localization
         /// Editor: project root. Windows/Linux players: next to the executable.
         /// Other players: StreamingAssets.
         /// </summary>
-        public static string LanguagesPath
-        {
-            get
-            {
-#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX
-                string projectPath = Path.GetDirectoryName(Application.dataPath);
-                if (projectPath != null)
-                {
-                    string normalizedPath = projectPath.Replace('\\', '/');
-                    int searchIndex = 0;
-                    while (true)
-                    {
-                        int libraryIndex = normalizedPath.IndexOf("/Library/", searchIndex, StringComparison.OrdinalIgnoreCase);
-                        if (libraryIndex < 0)
-                            break;
+        public static string LanguagesPath => _languagesPath ??= ComputeLanguagesPath();
 
-                        string candidatePath = projectPath.Substring(0, libraryIndex);
-                        if (Directory.Exists(Path.Combine(candidatePath, "Assets")) &&
-                            Directory.Exists(Path.Combine(candidatePath, "ProjectSettings")))
-                        {
-                            projectPath = candidatePath;
-                            break;
-                        }
-                        searchIndex = libraryIndex + 1;
-                    }
-                }
-                return Path.Combine(projectPath ?? string.Empty, LanguagesDirectory);
+        private static string _languagesPath;
+
+        private static string ComputeLanguagesPath()
+        {
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX
+            string projectPath = Path.GetDirectoryName(Application.dataPath);
+            if (TryGetCloneOwnerProjectPath(projectPath, out string ownerProjectPath))
+                projectPath = ownerProjectPath;
+
+            return Path.Combine(projectPath ?? string.Empty, LanguagesDirectory);
 #else
-                return Path.Combine(Application.streamingAssetsPath, LanguagesDirectory);
+            return Path.Combine(Application.streamingAssetsPath, LanguagesDirectory);
 #endif
+        }
+
+        /// <summary>
+        /// Clone editors (e.g. multiplayer play mode) run from a project nested in another
+        /// project's Library folder; they share the owner project's locales.
+        /// </summary>
+        private static bool TryGetCloneOwnerProjectPath(string projectPath, out string ownerProjectPath)
+        {
+            ownerProjectPath = null;
+            if (projectPath == null) return false;
+
+            string normalizedPath = projectPath.Replace('\\', '/');
+            int searchIndex = 0;
+            while (true)
+            {
+                int libraryIndex = normalizedPath.IndexOf("/Library/", searchIndex, StringComparison.OrdinalIgnoreCase);
+                if (libraryIndex < 0)
+                    return false;
+
+                string candidatePath = projectPath.Substring(0, libraryIndex);
+                if (Directory.Exists(Path.Combine(candidatePath, "Assets")) &&
+                    Directory.Exists(Path.Combine(candidatePath, "ProjectSettings")))
+                {
+                    ownerProjectPath = candidatePath;
+                    return true;
+                }
+                searchIndex = libraryIndex + 1;
             }
         }
 
@@ -98,26 +110,7 @@ namespace PicoShot.Localization
         private static bool IsCloneEditor()
         {
 #if UNITY_EDITOR
-            string projectPath = Path.GetDirectoryName(Application.dataPath);
-            if (projectPath == null) return false;
-
-            string normalized = projectPath.Replace('\\', '/');
-            int searchIndex = 0;
-            while (true)
-            {
-                int libraryIndex = normalized.IndexOf("/Library/", searchIndex, StringComparison.OrdinalIgnoreCase);
-                if (libraryIndex < 0)
-                    break;
-
-                string candidatePath = projectPath.Substring(0, libraryIndex);
-                if (Directory.Exists(Path.Combine(candidatePath, "Assets")) &&
-                    Directory.Exists(Path.Combine(candidatePath, "ProjectSettings")))
-                {
-                    return true;
-                }
-                searchIndex = libraryIndex + 1;
-            }
-            return false;
+            return TryGetCloneOwnerProjectPath(Path.GetDirectoryName(Application.dataPath), out _);
 #else
             return false;
 #endif
@@ -134,6 +127,8 @@ namespace PicoShot.Localization
 
         private static LanguageDictionary _currentLanguageData;
         private static LanguageDictionary _fallbackLanguageData;
+
+        private static LanguageDictionary _defaultLanguageData;
 
         private static HashSet<string> _allTranslationKeys;
         private static HashSet<string> _availableLanguages;
@@ -159,7 +154,7 @@ namespace PicoShot.Localization
             get
             {
                 if (!_isInitialized) Initialize();
-                return _allTranslationKeys ?? Enumerable.Empty<string>();
+                return GetAllKeys();
             }
         }
 #endif
@@ -293,7 +288,8 @@ namespace PicoShot.Localization
         private static void ScanAvailableLanguages()
         {
             _availableLanguages = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            _allTranslationKeys = new HashSet<string>(StringComparer.Ordinal);
+            _allTranslationKeys = null;
+            _defaultLanguageData = null;
 
             try
             {
@@ -314,7 +310,7 @@ namespace PicoShot.Localization
                 {
                     string fileName = Path.GetFileName(file);
 
-                    if (!LocaleBlocSerializer.ValidateFile(file, out _, out string languageCode) || string.IsNullOrEmpty(languageCode))
+                    if (!LocaleBlocSerializer.ReadFileInfo(file, out _, out string languageCode) || string.IsNullOrEmpty(languageCode))
                     {
                         Debug.LogWarning($"[LocalizationManager] Skipping invalid/corrupted file: {fileName}");
                         continue;
@@ -364,15 +360,13 @@ namespace PicoShot.Localization
                 {
                     try
                     {
-                        var defaultData = LoadLocaleFile(config.DefaultLanguage);
-                        foreach (var key in defaultData.Keys)
-                        {
-                            _allTranslationKeys.Add(key);
-                        }
+                        _defaultLanguageData = LoadLocaleFile(config.DefaultLanguage);
                     }
                     catch (Exception ex)
                     {
-                        Debug.LogError($"[LocalizationManager] Failed to load default language keys: {ex}");
+                        _availableLanguages.Remove(config.DefaultLanguage);
+                        Debug.LogError($"[LocalizationManager] Failed to load default language '{config.DefaultLanguage}': {ex}");
+                        OnLanguageLoadError?.Invoke($"Failed to load default language '{config.DefaultLanguage}'");
                     }
                 }
             }
@@ -493,18 +487,13 @@ namespace PicoShot.Localization
 
         private static void LoadLanguageData(string languageCode)
         {
-            var currentData = LoadLocaleFile(languageCode);
+            bool isDefault = string.Equals(languageCode, DefaultLanguage, StringComparison.OrdinalIgnoreCase);
 
-            if (string.Equals(languageCode, DefaultLanguage, StringComparison.OrdinalIgnoreCase) ||
-                !_availableLanguages.Contains(DefaultLanguage))
-            {
-                _fallbackLanguageData = currentData;
-            }
-            else
-            {
-                _fallbackLanguageData = LoadLocaleFile(DefaultLanguage);
-            }
+            var currentData = isDefault && _defaultLanguageData != null
+                ? _defaultLanguageData
+                : LoadLocaleFile(languageCode);
 
+            _fallbackLanguageData = _defaultLanguageData ?? currentData;
             _currentLanguageData = currentData;
         }
 
@@ -1072,6 +1061,14 @@ namespace PicoShot.Localization
         /// </summary>
         public static IEnumerable<string> GetAllKeys()
         {
+            if (_allTranslationKeys == null && _defaultLanguageData != null)
+            {
+                var keys = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var key in _defaultLanguageData.Keys)
+                    keys.Add(key);
+                _allTranslationKeys = keys;
+            }
+
             return _allTranslationKeys ?? Enumerable.Empty<string>();
         }
 
@@ -1218,6 +1215,7 @@ namespace PicoShot.Localization
         {
             _currentLanguageData = null;
             _fallbackLanguageData = null;
+            _defaultLanguageData = null;
             _arrayCache.Clear();
 
             _allTranslationKeys = null;

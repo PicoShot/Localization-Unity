@@ -17,7 +17,7 @@ namespace PicoShot.Localization.Bloc
 
         public const int LANGUAGE_CODE_SIZE = 12;
 
-        public static BlocFormatLayout FormatLayout = new(VERSION, Validate, Serialize, Deserialize);
+        public static BlocFormatLayout FormatLayout = new(VERSION, Validate, Serialize, Deserialize, ReadInfo);
         public static bool Validate(BinaryReader reader, out string languageCode)
         {
             languageCode = null;

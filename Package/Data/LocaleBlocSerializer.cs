@@ -53,13 +53,26 @@ namespace PicoShot.Localization.Data
                 else
                     File.Move(tempFile, path);
             }
-            catch(Exception)
+            catch (Exception)
             {
                 if (File.Exists(tempFile))
                     File.Delete(tempFile);
 
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Reads the version and language code from a BLOC file header, without
+        /// decompressing or checksumming the content.
+        /// </summary>
+        public static bool ReadFileInfo(string path, out ushort version, out string languageCode)
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException("BLOC file not found", path);
+
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096);
+            return BlocFormat.ReadInfo(stream, out version, out languageCode);
         }
 
         /// <summary>
