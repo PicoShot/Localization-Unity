@@ -22,7 +22,11 @@ namespace PicoShot.Localization.Config
         {
             get
             {
+#if UNITY_EDITOR
                 if (_cachedConfig == null)
+#else
+                if (ReferenceEquals(_cachedConfig, null))
+#endif
                 {
                     _cachedConfig = LoadOrCreateConfig();
                 }

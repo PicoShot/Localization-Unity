@@ -141,12 +141,15 @@ namespace PicoShot.Localization
 
         public static string CurrentLanguage => _currentLanguageCode;
         public static bool IsInitialized => _isInitialized;
-        public static bool IsRightToLeft => LanguageDefinitions.IsRightToLeft(_currentLanguageCode);
+        public static bool IsRightToLeft => _isRightToLeft;
 
         /// <summary>
         /// Digit glyphs used when rendering the current language.
         /// </summary>
-        public static RtlDigitStyle CurrentDigitStyle => RtlTextHandler.GetDigitStyle(_currentLanguageCode);
+        public static RtlDigitStyle CurrentDigitStyle => _digitStyle;
+
+        private static bool _isRightToLeft;
+        private static RtlDigitStyle _digitStyle;
 
 #if UNITY_EDITOR
         public static IEnumerable<string> AllTranslationKeys
@@ -416,6 +419,8 @@ namespace PicoShot.Localization
             {
                 LoadLanguageData(targetLanguage);
                 _currentLanguageCode = targetLanguage;
+                _isRightToLeft = LanguageDefinitions.IsRightToLeft(targetLanguage);
+                _digitStyle = RtlTextHandler.GetDigitStyle(targetLanguage);
 
                 _arrayCache.Clear();
                 TriggerFontChanged();
@@ -636,15 +641,25 @@ namespace PicoShot.Localization
             if (string.IsNullOrEmpty(key)) return string.Empty;
             if (!_isInitialized) Initialize();
 
-            string[] array = GetArrayInternal(Key.FromKey(key));
-            if (array == null || array.Length == 0)
+            object value = FindArrayValue(Key.FromKey(key), key);
+            int length = value switch
+            {
+                List<string> list => list.Count,
+                string _ => 1,
+                _ => 0
+            };
+
+            if (length == 0)
             {
                 Debug.LogWarning($"[LocalizationManager] Key '{key}' is not an array or is empty");
                 return $"[{key}]";
             }
 
-            if (index >= 0 && index < array.Length)
-                return array[index] ?? string.Empty;
+            if (index >= 0 && index < length)
+            {
+                string element = value is List<string> items ? items[index] : (string)value;
+                return element ?? string.Empty;
+            }
 
             Debug.LogWarning($"[LocalizationManager] Array index {index} out of range for key '{key}'");
             return $"[{key}:{index}]";
@@ -844,6 +859,7 @@ namespace PicoShot.Localization
 
         /// <summary>
         /// Gets an array of strings by key.
+        /// The returned array is cached and shared until the language changes: do not modify it.
         /// </summary>
         public static string[] GetArray(string key)
         {
@@ -943,6 +959,14 @@ namespace PicoShot.Localization
 
         private static string[] GetArrayInternal(Key key, string keyDisplayName = null)
         {
+            return ConvertToStringArray(FindArrayValue(key, keyDisplayName));
+        }
+
+        /// <summary>
+        /// Looks up an array value in the current language, then the fallback. Returns null when missing.
+        /// </summary>
+        private static object FindArrayValue(Key key, string keyDisplayName)
+        {
             object value = null;
             bool found = false;
 
@@ -966,7 +990,7 @@ namespace PicoShot.Localization
                 return null;
             }
 
-            return ConvertToStringArray(value);
+            return value;
         }
 
         private static string[] ConvertToStringArray(object value)
