@@ -217,40 +217,35 @@ namespace PicoShot.Localization.Bloc
         }
 
         #region Utilities
-        public static uint ComputeCrc32(ReadOnlySpan<byte> data)
+        private static readonly uint[] Crc32Table = CreateCrc32Table();
+
+        private static uint[] CreateCrc32Table()
         {
             const uint polynomial = 0xEDB88320;
-            uint crc = 0xFFFFFFFF;
-
-            for (int i = 0; i < data.Length; i++)
+            var table = new uint[256];
+            for (uint i = 0; i < 256; i++)
             {
-                crc ^= data[i];
+                uint crc = i;
                 for (int j = 0; j < 8; j++)
-                {
-                    if ((crc & 1) != 0)
-                        crc = (crc >> 1) ^ polynomial;
-                    else
-                        crc >>= 1;
-                }
+                    crc = (crc & 1) != 0 ? (crc >> 1) ^ polynomial : crc >> 1;
+                table[i] = crc;
             }
+            return table;
+        }
 
+        public static uint ComputeCrc32(ReadOnlySpan<byte> data)
+        {
+            uint crc = 0xFFFFFFFF;
+            ComputeCrc32(ref crc, data);
             return ~crc;
         }
         public static void ComputeCrc32(ref uint crc, ReadOnlySpan<byte> data)
         {
-            const uint polynomial = 0xEDB88320;
-
+            uint[] table = Crc32Table;
+            uint value = crc;
             for (int i = 0; i < data.Length; i++)
-            {
-                crc ^= data[i];
-                for (int j = 0; j < 8; j++)
-                {
-                    if ((crc & 1) != 0)
-                        crc = (crc >> 1) ^ polynomial;
-                    else
-                        crc >>= 1;
-                }
-            }
+                value = table[(byte)(value ^ data[i])] ^ (value >> 8);
+            crc = value;
         }
         public static int GetVarIntSize(uint value)
         {
