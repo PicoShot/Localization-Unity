@@ -330,6 +330,7 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 config.SetProtectionMode(newMode);
                 LocalizationConfigProvider.SaveConfig();
+                LocaleHashSync.SyncIfEnabled("enabling anti-tamper");
                 GUI.changed = true;
             }
             EditorGUILayout.EndHorizontal();
@@ -610,28 +611,7 @@ namespace PicoShot.Localization.Editor.Tabs
                     return;
                 }
 
-                var files = Directory.GetFiles(LocalizationManager.LanguagesPath, "*.bloc");
-                int syncedCount = 0;
-                int removedCount = 0;
-
-                var existingHashes = new HashSet<string>(config.GetFileHashes().Select(h => h.fileName));
-
-                foreach (var file in files)
-                {
-                    string fileName = Path.GetFileName(file);
-                    string hash = LocalizationManager.CalculateFileHash(file);
-                    config.SetFileHash(fileName, hash);
-                    syncedCount++;
-                    existingHashes.Remove(fileName);
-                }
-
-                foreach (var oldFile in existingHashes)
-                {
-                    config.RemoveFileHash(oldFile);
-                    removedCount++;
-                }
-
-                LocalizationConfigProvider.SaveConfig();
+                LocaleHashSync.Sync(config, out int syncedCount, out int removedCount);
 
                 EditorUtility.DisplayDialog("Hashes Synced",
                     $"Successfully synced {syncedCount} file hashes.\n" +

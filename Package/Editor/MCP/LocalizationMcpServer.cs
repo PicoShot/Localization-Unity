@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
+using PicoShot.Localization.Editor.Services;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
 
@@ -435,6 +436,7 @@ namespace PicoShot.Localization.Editor.Mcp
             if (_externalChangePending)
             {
                 _externalChangePending = false;
+                LocaleHashSync.SyncIfEnabled("MCP edit");
                 try { ExternalChanged?.Invoke(); }
                 catch (Exception ex) { Debug.LogError("[Localization MCP] ExternalChanged handler failed: " + ex.Message); }
             }

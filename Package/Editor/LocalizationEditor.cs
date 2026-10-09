@@ -426,6 +426,7 @@ namespace PicoShot.Localization
             }
 
             LocalizationManager.DeleteJunkFiles();
+            LocaleHashSync.SyncIfEnabled("file upgrade");
         }
 
         /// <summary>
@@ -519,6 +520,7 @@ namespace PicoShot.Localization
                 var config = LocalizationConfigProvider.Config;
                 config.SetSelectedLanguages(new List<string>(_data.LanguageCodes));
                 LocalizationConfigProvider.SaveConfig();
+                LocaleHashSync.SyncIfEnabled("save");
 
                 _data.HasUnsavedChanges = false;
                 ShowNotification(new GUIContent("Language data saved successfully!"));

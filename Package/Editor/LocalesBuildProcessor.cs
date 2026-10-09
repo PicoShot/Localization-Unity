@@ -2,6 +2,7 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Reporting;
 using UnityEngine;
+using PicoShot.Localization.Editor.Services;
 using System.IO;
 
 namespace PicoShot.Localization.Editor
@@ -20,6 +21,8 @@ namespace PicoShot.Localization.Editor
         /// </summary>
         public override void PrepareForBuild(BuildPlayerContext buildPlayerContext)
         {
+            LocaleHashSync.SyncIfEnabled("build");
+
             if (IsStandalonePlatform(buildPlayerContext.BuildPlayerOptions.target))
                 return;
 

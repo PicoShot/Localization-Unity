@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
+using PicoShot.Localization.Bloc;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
 using PicoShot.Localization.Hashing;
@@ -396,6 +397,12 @@ namespace PicoShot.Localization
             }
 
             string targetLanguage = ResolveTargetLanguage(languageCode, useFallback);
+            if (targetLanguage == null)
+            {
+                Debug.LogError($"[LocalizationManager] Cannot set language '{languageCode}': no language files are available");
+                OnLanguageLoadError?.Invoke($"No language available for '{languageCode}'");
+                return;
+            }
 
             if (_currentLanguageCode == targetLanguage && _currentLanguageData != null)
                 return;
@@ -428,7 +435,16 @@ namespace PicoShot.Localization
                     return fallback;
             }
 
-            return DefaultLanguage;
+            if (_availableLanguages.Contains(DefaultLanguage))
+                return DefaultLanguage;
+
+            string firstAvailable = null;
+            foreach (var code in _availableLanguages)
+            {
+                if (firstAvailable == null || string.CompareOrdinal(code, firstAvailable) < 0)
+                    firstAvailable = code;
+            }
+            return firstAvailable;
         }
 
         /// <summary>
@@ -466,20 +482,28 @@ namespace PicoShot.Localization
 
         private static void LoadLanguageData(string languageCode)
         {
-            _currentLanguageData = LoadLocaleFile(languageCode);
+            var currentData = LoadLocaleFile(languageCode);
 
-            if (languageCode != DefaultLanguage)
+            if (string.Equals(languageCode, DefaultLanguage, StringComparison.OrdinalIgnoreCase) ||
+                !_availableLanguages.Contains(DefaultLanguage))
             {
-                _fallbackLanguageData = LoadLocaleFile(DefaultLanguage);
+                _fallbackLanguageData = currentData;
             }
             else
             {
-                _fallbackLanguageData = _currentLanguageData;
+                _fallbackLanguageData = LoadLocaleFile(DefaultLanguage);
             }
+
+            _currentLanguageData = currentData;
         }
 
         private static LanguageDictionary LoadLocaleFile(string languageCode)
         {
+            if (_availableLanguages == null || !_availableLanguages.Contains(languageCode))
+            {
+                throw new InvalidOperationException($"Language '{languageCode}' is not available or did not pass protection checks");
+            }
+
             string filePath = GetLocaleFilePath(languageCode);
 
             if (!File.Exists(filePath))
@@ -487,7 +511,25 @@ namespace PicoShot.Localization
                 throw new FileNotFoundException($"Locale file not found for language '{languageCode}'", filePath);
             }
 
-            var localeData = LocaleBlocSerializer.LoadFile(filePath, out var info);
+            LocaleData localeData;
+            var config = LocalizationConfigProvider.Config;
+            if (config.IsAntiTamperEnabled)
+            {
+                byte[] bytes = File.ReadAllBytes(filePath);
+                string fileName = Path.GetFileName(filePath);
+                if (!config.TryGetFileHash(fileName, out string expectedHash) ||
+                    !string.Equals(expectedHash, CalculateHash(bytes), StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidDataException($"File tampering detected: {fileName}");
+                }
+
+                using var stream = new MemoryStream(bytes, writable: false);
+                localeData = BlocFormat.Deserialize(stream, out _);
+            }
+            else
+            {
+                localeData = LocaleBlocSerializer.LoadFile(filePath, out _);
+            }
 
             if (localeData?.Translations == null)
             {
@@ -521,8 +563,25 @@ namespace PicoShot.Localization
         {
             using var sha256 = SHA256.Create();
             using var stream = File.OpenRead(filePath);
-            byte[] hash = sha256.ComputeHash(stream);
-            return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+            return ToHex(sha256.ComputeHash(stream));
+        }
+
+        private static string CalculateHash(byte[] data)
+        {
+            using var sha256 = SHA256.Create();
+            return ToHex(sha256.ComputeHash(data));
+        }
+
+        private static string ToHex(byte[] hash)
+        {
+            const string digits = "0123456789abcdef";
+            var chars = new char[hash.Length * 2];
+            for (int i = 0; i < hash.Length; i++)
+            {
+                chars[i * 2] = digits[hash[i] >> 4];
+                chars[i * 2 + 1] = digits[hash[i] & 0xF];
+            }
+            return new string(chars);
         }
 
         /// <summary>
