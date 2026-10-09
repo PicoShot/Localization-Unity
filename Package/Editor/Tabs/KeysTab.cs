@@ -20,6 +20,8 @@ namespace PicoShot.Localization.Editor.Tabs
     {
         private const string NewKeyNameControl = "Keys.NewKeyName";
         private const string NewKeyValueControl = "Keys.NewKeyValue";
+        private const string ValueControlPrefix = "Keys.Value.";
+        private const string ElementControlPrefix = "Keys.Element.";
         private const float RowPadding = 6f;
         private const float FieldMinHeight = 20f;
         private const float ArrayIndexWidth = 24f;
@@ -39,6 +41,9 @@ namespace PicoShot.Localization.Editor.Tabs
         private float _detailsWidth;
         private string _pendingFocusControl;
         private string _arrayTargetLanguage;
+
+        private string _lastValueControl;
+        private string _lastValueKey;
 
         private bool _showNewKeyForm;
         private bool _newKeyIsArray;
@@ -67,6 +72,19 @@ namespace PicoShot.Localization.Editor.Tabs
             var evt = Event.current;
             if (evt.type == EventType.MouseMove)
                 Editor.Repaint();
+
+            if (evt.type == EventType.KeyDown && EditorGUI.actionKey && evt.keyCode == KeyCode.E && OpenFocusedValueEditor())
+                evt.Use();
+
+            if (evt.type == EventType.Repaint)
+            {
+                string focused = GUI.GetNameOfFocusedControl();
+                if (IsValueControl(focused))
+                {
+                    _lastValueControl = focused;
+                    _lastValueKey = Data.SelectedKey;
+                }
+            }
 
             if ((evt.type == EventType.ValidateCommand || evt.type == EventType.ExecuteCommand) && evt.commandName == "Find")
             {
@@ -781,6 +799,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 DrawShortcut("↑ / ↓", "Select previous / next key");
                 DrawShortcut("Alt + ↑ / ↓", "Move key up / down");
                 DrawShortcut("F2 or double-click", "Rename key");
+                DrawShortcut($"{mod} + E", "Edit value in a larger window");
                 DrawShortcut($"{mod} + T", "Translate missing languages");
                 DrawShortcut($"{mod} + F", "Search");
                 DrawShortcut($"{mod} + C", "Copy key name");
@@ -821,9 +840,9 @@ namespace PicoShot.Localization.Editor.Tabs
                 DrawLanguageFieldHeader(lang, isDefault, issue, text.Length,
                     canTranslate: !sourceEmpty, hasText: text.Length > 0,
                     onTranslate: () => TranslateMissing(key, captured),
-                    onExpand: () => OpenTextEditor(text, newText => SetStringValue(key, captured, newText, false)));
+                    onExpand: () => OpenValueEditor(key, captured));
 
-                string newValue = DrawTextEditor($"Keys.Value.{lang}", text,
+                string newValue = DrawTextEditor(ValueControlPrefix + lang, text,
                     isDefault ? "Source text" : "Not translated", GUILayout.ExpandWidth(true));
                 if (newValue != text)
                     SetStringValue(key, lang, newValue, true);
@@ -842,7 +861,7 @@ namespace PicoShot.Localization.Editor.Tabs
             if (onExpand != null)
             {
                 var expandRect = new Rect(right - IconButtonSize, rect.y, IconButtonSize, rect.height);
-                if (GUI.Button(expandRect, Styles.Icon("editicon.sml", "…", "Edit in a larger window"), EditorStyles.iconButton))
+                if (GUI.Button(expandRect, Styles.Icon("editicon.sml", "…", $"Edit in a larger window ({ActionKeyName}+E)"), EditorStyles.iconButton))
                     onExpand();
                 right -= IconButtonSize + 2f;
             }
@@ -972,13 +991,13 @@ namespace PicoShot.Localization.Editor.Tabs
                 {
                     GUILayout.Label(i.ToString(), Styles.MutedLabel, GUILayout.Width(ArrayIndexWidth), GUILayout.Height(FieldMinHeight));
 
-                    string newSource = DrawTextEditor($"Keys.Element.{i}.Source", sourceText, "Source text", GUILayout.Width(columnWidth));
+                    string newSource = DrawTextEditor($"{ElementControlPrefix}{i}.Source", sourceText, "Source text", GUILayout.Width(columnWidth));
                     if (newSource != sourceText)
                         SetElementValue(key, defaultLang, i, newSource);
 
                     if (target != null)
                     {
-                        string newTarget = DrawTextEditor($"Keys.Element.{i}.Target", targetText, "Not translated", GUILayout.Width(columnWidth));
+                        string newTarget = DrawTextEditor($"{ElementControlPrefix}{i}.Target", targetText, "Not translated", GUILayout.Width(columnWidth));
                         if (newTarget != targetText)
                             SetElementValue(key, target, i, newTarget);
                     }
@@ -1081,12 +1100,112 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.Space(4);
         }
 
-        private void SetElementValue(string key, string lang, int index, string text)
+        /// <summary>
+        /// Opens the large text editor for one language of a string key, or one element of an array key.
+        /// </summary>
+        private void OpenValueEditor(string key, string lang, int elementIndex = -1)
+        {
+            if (!Data.LanguageData.TryGetValue(key, out var keyData))
+                return;
+
+            string defaultLang = DefaultLanguage;
+            keyData.TryGetValue(lang, out var value);
+            keyData.TryGetValue(defaultLang, out var source);
+
+            string text, reference;
+            Action<string> onSave;
+            if (elementIndex >= 0)
+            {
+                var list = value as List<string>;
+                var sourceList = source as List<string>;
+                if (list == null || elementIndex >= list.Count)
+                    return;
+
+                text = list[elementIndex] ?? "";
+                reference = sourceList != null && elementIndex < sourceList.Count ? sourceList[elementIndex] : null;
+                onSave = newText =>
+                {
+                    SetElementValue(key, lang, elementIndex, newText, coalesce: false);
+                    Editor.Repaint();
+                };
+            }
+            else
+            {
+                text = value as string ?? "";
+                reference = source as string;
+                onSave = newText => SetStringValue(key, lang, newText, false);
+            }
+
+            // Drop focus so the inline field shows the saved text afterwards
+            GUIUtility.keyboardControl = 0;
+
+            LocalizationTextEditorPopup.OpenText(text, onSave,
+                title: elementIndex >= 0 ? $"{key} [{elementIndex}]" : key,
+                subtitle: $"{LanguageDefinitions.GetDisplayName(lang)} ({lang})",
+                referenceText: lang == defaultLang ? null : reference,
+                referenceLabel: $"{LanguageDefinitions.GetDisplayName(defaultLang)} (source)",
+                rightToLeft: LanguageDefinitions.IsRightToLeft(lang));
+        }
+
+        /// <summary>
+        /// Ctrl/Cmd+E: opens the large editor for the value field being edited, the last one edited for
+        /// this key, or the source language.
+        /// </summary>
+        private bool OpenFocusedValueEditor()
+        {
+            string key = Data.SelectedKey;
+            if (string.IsNullOrEmpty(key) || !Data.LanguageData.TryGetValue(key, out var keyData))
+                return false;
+
+            string control = GUI.GetNameOfFocusedControl();
+            if (!IsValueControl(control))
+                control = _lastValueKey == key ? _lastValueControl : null;
+
+            string defaultLang = DefaultLanguage;
+
+            if (control != null && control.StartsWith(ValueControlPrefix, StringComparison.Ordinal))
+            {
+                string lang = control.Substring(ValueControlPrefix.Length);
+                if (Data.LanguageCodes.Contains(lang))
+                {
+                    OpenValueEditor(key, lang);
+                    return true;
+                }
+            }
+            else if (control != null && control.StartsWith(ElementControlPrefix, StringComparison.Ordinal))
+            {
+                var parts = control.Substring(ElementControlPrefix.Length).Split('.');
+                if (parts.Length == 2 && int.TryParse(parts[0], out int index))
+                {
+                    string lang = parts[1] == "Target" && _arrayTargetLanguage != null ? _arrayTargetLanguage : defaultLang;
+                    OpenValueEditor(key, lang, index);
+                    return true;
+                }
+            }
+
+            if (LanguageEditorData.IsArrayKey(keyData))
+            {
+                OpenValueEditor(key, defaultLang, 0);
+                return true;
+            }
+
+            OpenValueEditor(key, defaultLang);
+            return true;
+        }
+
+        private static bool IsValueControl(string control)
+        {
+            return !string.IsNullOrEmpty(control) &&
+                   (control.StartsWith(ValueControlPrefix, StringComparison.Ordinal) ||
+                    control.StartsWith(ElementControlPrefix, StringComparison.Ordinal));
+        }
+
+        private void SetElementValue(string key, string lang, int index, string text, bool coalesce = true)
         {
             if (!Data.LanguageData.TryGetValue(key, out var keyData) || !(keyData.TryGetValue(lang, out var value) && value is List<string> list) || index >= list.Count)
                 return;
 
-            Data.History.Record("Edit Translation", key, $"{key}|{lang}|{index}");
+            Data.History.Record("Edit Translation", key, coalesce ? $"{key}|{lang}|{index}" : null);
             list[index] = text ?? "";
             Data.HasUnsavedChanges = true;
         }
@@ -1238,7 +1357,15 @@ namespace PicoShot.Localization.Editor.Tabs
             string prefix = inView ? key.Substring(0, viewPrefix.Length) : "";
             string editable = inView ? key.Substring(prefix.Length) : key;
 
-            OpenTextEditor(editable, newName =>
+            string ValidateName(string name)
+            {
+                string full = prefix + name;
+                return Data.Keys.Any(k => !k.Equals(key, StringComparison.OrdinalIgnoreCase) && k.Equals(full, StringComparison.OrdinalIgnoreCase))
+                    ? $"'{full}' already exists (key names are case-insensitive)."
+                    : null;
+            }
+
+            LocalizationTextEditorPopup.OpenKeyName(editable, newName =>
             {
                 newName = LocalizationTextEditorPopup.FilterKeyName(newName?.Trim() ?? "");
                 if (string.IsNullOrEmpty(newName))
@@ -1260,7 +1387,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 Data.History.RecordKeys("Rename Key", key, newFullKey);
                 Data.RenameKey(key, newFullKey);
                 Editor.Repaint();
-            }, isKeyName: true);
+            }, prefix.Length > 0 ? $"Rename Key in '{Data.SelectedView}'" : "Rename Key", ValidateName);
         }
 
         private void ClearKeyData(string key)
@@ -1434,10 +1561,5 @@ namespace PicoShot.Localization.Editor.Tabs
         }
 
         #endregion
-
-        private static void OpenTextEditor(string text, Action<string> onSave, bool isKeyName = false)
-        {
-            LocalizationTextEditorPopup.Open(text, onSave, isKeyName);
-        }
     }
 }

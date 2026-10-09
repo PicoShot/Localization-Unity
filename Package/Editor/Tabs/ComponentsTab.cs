@@ -1052,7 +1052,7 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 menu.AddItem(new GUIContent($"{path}Create Key '{suggested}'"), false, () => LocalizeRow(row, suggested, true));
                 menu.AddItem(new GUIContent($"{path}Create Key with Name…"), false, () =>
-                    LocalizationTextEditorPopup.Open(suggested, name =>
+                    LocalizationTextEditorPopup.OpenKeyName(suggested, name =>
                     {
                         name = LocalizationTextEditorPopup.FilterKeyName(name?.Trim() ?? "");
                         if (string.IsNullOrEmpty(name))
@@ -1063,7 +1063,7 @@ namespace PicoShot.Localization.Editor.Tabs
                             return;
                         }
                         LocalizeRow(row, name, true);
-                    }, isKeyName: true));
+                    }, "New Key Name", name => KeyTaken(name) ? $"'{name}' already exists." : null));
             }
             else
             {
