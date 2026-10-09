@@ -437,6 +437,8 @@ namespace PicoShot.Localization.Editor.Mcp
             {
                 _externalChangePending = false;
                 LocaleHashSync.SyncIfEnabled("MCP edit");
+                if (LocalizationManager.IsInitialized)
+                    LocalizationManager.Reload();
                 try { ExternalChanged?.Invoke(); }
                 catch (Exception ex) { Debug.LogError("[Localization MCP] ExternalChanged handler failed: " + ex.Message); }
             }

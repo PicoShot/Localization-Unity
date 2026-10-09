@@ -128,6 +128,7 @@ namespace PicoShot.Localization
         #region State
 
         private static string _currentLanguageCode;
+        private static string _pendingLanguageCode;
         private static bool _isInitialized;
         private static bool _initializationAttempted;
 
@@ -231,10 +232,16 @@ namespace PicoShot.Localization
                     : DetectSystemLanguage();
 #endif
 
-                SetLanguage(targetLanguage, useFallback: false);
+                if (!string.IsNullOrEmpty(_pendingLanguageCode))
+                {
+                    targetLanguage = _pendingLanguageCode;
+                    _pendingLanguageCode = null;
+                }
 
+                SetLanguage(targetLanguage, useFallback: true);
+
+                Application.quitting -= Dispose;
                 Application.quitting += Dispose;
-                OnLanguageChanged?.Invoke();
             }
             catch (Exception ex)
             {
@@ -392,8 +399,12 @@ namespace PicoShot.Localization
 
             if (!_isInitialized)
             {
+                _pendingLanguageCode = languageCode;
                 Initialize();
-                return;
+                _pendingLanguageCode = null;
+
+                if (!_isInitialized)
+                    return;
             }
 
             string targetLanguage = ResolveTargetLanguage(languageCode, useFallback);
@@ -1189,8 +1200,25 @@ namespace PicoShot.Localization
             OnLanguageLoadError = null;
             OnMissingTranslation = null;
 
+            Application.quitting -= Dispose;
+            ResetLoadedData();
+        }
+
+        /// <summary>
+        /// Reloads all language files from disk while keeping event subscribers and the current
+        /// language. Subscribed components refresh through OnLanguageChanged.
+        /// </summary>
+        public static void Reload()
+        {
+            ResetLoadedData();
+            Initialize();
+        }
+
+        private static void ResetLoadedData()
+        {
             _currentLanguageData = null;
             _fallbackLanguageData = null;
+            _arrayCache.Clear();
 
             _allTranslationKeys = null;
             _availableLanguages = null;

@@ -527,8 +527,7 @@ namespace PicoShot.Localization
 
                 if (LocalizationManager.IsInitialized)
                 {
-                    LocalizationManager.Dispose();
-                    LocalizationManager.Initialize();
+                    LocalizationManager.Reload();
                 }
 
                 if (config.GenerateTypedKeys)
@@ -612,7 +611,6 @@ namespace PicoShot.Localization
         private void UnregisterEventHandlers()
         {
             Editor.Mcp.LocalizationMcpServer.ExternalChanged -= OnMcpExternalChanged;
-            LocalizationManager.Dispose();
         }
 
         #endregion
