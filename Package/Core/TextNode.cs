@@ -1,6 +1,7 @@
 //#define NETCODE
 
 using System;
+using System.Text;
 
 #if NETCODE
 using Unity.Netcode;
@@ -47,22 +48,22 @@ namespace PicoShot.Localization
 
         public bool IsEmpty => string.IsNullOrWhiteSpace(Value);
 
-        private string applyModifiers(in string text)
+        private string applyModifiers(string text)
         {
             if (RichModifiers == null || RichModifiers.Length == 0)
                 return text;
 
-            string output = string.Empty;
+            var output = new StringBuilder((text?.Length ?? 0) + RichModifiers.Length * 16);
 
             for (int i = 0; i < RichModifiers.Length; i++)
-                output += RichModifiers[i].Begin();
+                RichModifiers[i].AppendBegin(output);
 
-            output += text;
+            output.Append(text);
 
             for (int i = RichModifiers.Length - 1; i >= 0; i--)
-                output += RichModifiers[i].End();
+                RichModifiers[i].AppendEnd(output);
 
-            return output;
+            return output.ToString();
         }
 
         public TextNode(string value)
@@ -74,21 +75,48 @@ namespace PicoShot.Localization
         }
         public override string ToString()
         {
+            string logical = ToLogicalString();
+
+            return ContainsLocalizedText() ? LocalizationManager.ApplyRtl(logical) : logical;
+        }
+
+        /// <summary>
+        /// Builds the text in logical (unshaped) order, with every localized node translated.
+        /// </summary>
+        internal string ToLogicalString()
+        {
             if (Type == NodeType.PlainText)
                 return applyModifiers(Value);
 
-            Nodes ??= Array.Empty<TextNode>();
+            var nodes = Nodes ?? Array.Empty<TextNode>();
 
-            var arguments = new string[Nodes.Length];
-            for (int i = 0; i < Nodes.Length; i++)
-                arguments[i] = Nodes[i].ToString();
+            var arguments = nodes.Length == 0 ? Array.Empty<string>() : new string[nodes.Length];
+            for (int i = 0; i < nodes.Length; i++)
+                arguments[i] = nodes[i].ToLogicalString();
 
             return applyModifiers(Type switch
             {
-                NodeType.LocalizedText => LocalizationManager.GetText(Value, arguments),
+                NodeType.LocalizedText => LocalizationManager.GetLogicalText(Value, arguments),
                 NodeType.FormattedText => string.Format(Value, arguments),
                 _ => throw new NotImplementedException()
             });
+        }
+
+        private bool ContainsLocalizedText()
+        {
+            if (Type == NodeType.LocalizedText)
+                return true;
+
+            if (Nodes == null)
+                return false;
+
+            for (int i = 0; i < Nodes.Length; i++)
+            {
+                if (Nodes[i].ContainsLocalizedText())
+                    return true;
+            }
+
+            return false;
         }
 
         public static TextNode Empty => Text(string.Empty);
@@ -129,17 +157,16 @@ namespace PicoShot.Localization
             if (others == null || others.Length < 1)
                 return default;
 
-            var combined = new TextNode()
+            var format = new StringBuilder(others.Length * 4);
+            for (int i = 0; i < others.Length; i++)
+                format.Append('{').Append(i).Append('}');
+
+            return new TextNode()
             {
                 Type = NodeType.FormattedText,
-                Value = string.Empty,
+                Value = format.ToString(),
                 Nodes = others
             };
-
-            for (int i = 0; i < others.Length; i++)
-                combined.Value += "{" + i + "}";
-
-            return combined;
         }
 
         public TextNode AddModifier(RichModifier modifier)
@@ -232,6 +259,25 @@ namespace PicoShot.Localization
                 return text;
 
             return $"{Begin()}{text}{End()}";
+        }
+
+        internal void AppendBegin(StringBuilder builder)
+        {
+            if (string.IsNullOrEmpty(Tag))
+                return;
+
+            builder.Append('<').Append(Tag);
+            if (!string.IsNullOrEmpty(Argument))
+                builder.Append('=').Append(Argument);
+            builder.Append('>');
+        }
+
+        internal void AppendEnd(StringBuilder builder)
+        {
+            if (string.IsNullOrEmpty(Tag))
+                return;
+
+            builder.Append("</").Append(Tag).Append('>');
         }
 #if NETCODE
         void INetworkSerializable.NetworkSerialize<T>(BufferSerializer<T> serializer)

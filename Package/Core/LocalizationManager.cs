@@ -667,7 +667,7 @@ namespace PicoShot.Localization
         /// <summary>
         /// Converts logical text into the visual form required by the current language.
         /// </summary>
-        private static string ApplyRtl(string text)
+        internal static string ApplyRtl(string text)
         {
             if (string.IsNullOrEmpty(text)) return text;
 
