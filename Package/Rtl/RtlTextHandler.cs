@@ -124,6 +124,8 @@ namespace PicoShot.Localization.Rtl
         {
             if (string.IsNullOrEmpty(str)) return str;
 
+            if (!isMainRtl && !ContainsRtl(str)) return str;
+
             FixerTool.ShowTashkeel = false;
             FixerTool.CombineTashkeel = true;
             // Digits only take a localized form when the paragraph itself is RTL.
@@ -133,111 +135,123 @@ namespace PicoShot.Localization.Rtl
             if (str.IndexOf('\n') < 0 && str.IndexOf('\r') < 0)
                 return FixMixedLine(str, isMainRtl, preserveOrder, alreadyShaped);
 
+            return FixMixedLines(str, isMainRtl, preserveOrder, alreadyShaped);
+        }
+
+        private static string FixMixedLines(string str, bool isMainRtl, bool preserveOrder, bool alreadyShaped)
+        {
             return ProcessLines(str, line => FixMixedLine(line, isMainRtl, preserveOrder, alreadyShaped));
+        }
+
+        private static bool ContainsRtl(string str)
+        {
+            for (int i = 0; i < str.Length; i++)
+            {
+                if (IsRtlChar(str[i])) return true;
+            }
+            return false;
         }
 
         private static string FixMixedLine(string str, bool isMainRtl, bool preserveOrder, bool alreadyShaped)
         {
             if (string.IsNullOrEmpty(str)) return str;
 
-            var rawTokens = new List<TextToken>();
-            CharDirection currentDir = CharDirection.Neutral;
-            TextToken currentToken = null;
+            var runs = _runs ??= new List<Run>(16);
+            runs.Clear();
 
             for (int i = 0; i < str.Length; i++)
             {
                 char c = str[i];
                 CharDirection dir = GetCharDirection(c);
 
-                // Combining marks belong to the character they follow.
-                if (currentToken != null && dir == CharDirection.Neutral &&
-                    CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                if (runs.Count > 0)
                 {
-                    currentToken.Text.Append(c);
-                    continue;
+                    Run last = runs[runs.Count - 1];
+                    if (dir == last.Direction ||
+                        dir == CharDirection.Neutral && CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                    {
+                        last.Length++;
+                        runs[runs.Count - 1] = last;
+                        continue;
+                    }
                 }
 
-                if (currentToken == null || dir != currentDir)
-                {
-                    currentDir = dir;
-                    currentToken = new TextToken { Direction = dir };
-                    rawTokens.Add(currentToken);
-                }
-
-                currentToken.Text.Append(c);
+                runs.Add(new Run(i, 1, dir));
             }
 
             CharDirection mainDir = isMainRtl ? CharDirection.RTL : CharDirection.LTR;
-            for (int i = 0; i < rawTokens.Count; i++)
+            for (int i = 0; i < runs.Count; i++)
             {
-                if (rawTokens[i].Direction == CharDirection.Neutral)
-                {
-                    CharDirection prevDir = (i > 0) ? rawTokens[i - 1].Direction : CharDirection.Neutral;
-                    CharDirection nextDir = (i < rawTokens.Count - 1) ? rawTokens[i + 1].Direction : CharDirection.Neutral;
+                Run run = runs[i];
+                if (run.Direction != CharDirection.Neutral) continue;
 
-                    if (prevDir == nextDir && prevDir != CharDirection.Neutral)
-                        rawTokens[i].Direction = prevDir;
-                    else
-                        rawTokens[i].Direction = mainDir;
-                }
+                CharDirection prevDir = i > 0 ? runs[i - 1].Direction : CharDirection.Neutral;
+                CharDirection nextDir = i < runs.Count - 1 ? runs[i + 1].Direction : CharDirection.Neutral;
+
+                run.Direction = prevDir == nextDir && prevDir != CharDirection.Neutral ? prevDir : mainDir;
+                runs[i] = run;
             }
 
-            var mergedTokens = new List<TextToken>();
-            if (rawTokens.Count > 0)
+            int merged = 0;
+            for (int i = 1; i < runs.Count; i++)
             {
-                var currentMerged = new TextToken { Direction = rawTokens[0].Direction };
-                currentMerged.Text.Append(rawTokens[0].Text);
-                mergedTokens.Add(currentMerged);
-
-                for (int i = 1; i < rawTokens.Count; i++)
+                Run current = runs[merged];
+                Run next = runs[i];
+                if (next.Direction == current.Direction)
                 {
-                    if (rawTokens[i].Direction == currentMerged.Direction)
-                    {
-                        currentMerged.Text.Append(rawTokens[i].Text);
-                    }
-                    else
-                    {
-                        currentMerged = new TextToken { Direction = rawTokens[i].Direction };
-                        currentMerged.Text.Append(rawTokens[i].Text);
-                        mergedTokens.Add(currentMerged);
-                    }
+                    current.Length += next.Length;
+                    runs[merged] = current;
+                }
+                else
+                {
+                    runs[++merged] = next;
                 }
             }
+            runs.RemoveRange(merged + 1, runs.Count - merged - 1);
 
-            var sb = new StringBuilder(str.Length);
+            var sb = _mixedBuilder ??= new StringBuilder(256);
+            sb.Clear();
+            sb.EnsureCapacity(str.Length);
+
             if (isMainRtl && !preserveOrder)
             {
-                for (int i = mergedTokens.Count - 1; i >= 0; i--)
-                {
-                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder, alreadyShaped));
-                }
+                for (int i = runs.Count - 1; i >= 0; i--)
+                    AppendRun(sb, str, runs[i], preserveOrder, alreadyShaped);
             }
             else
             {
-                for (int i = 0; i < mergedTokens.Count; i++)
-                {
-                    sb.Append(ProcessToken(mergedTokens[i], preserveOrder, alreadyShaped));
-                }
+                for (int i = 0; i < runs.Count; i++)
+                    AppendRun(sb, str, runs[i], preserveOrder, alreadyShaped);
             }
 
             return sb.ToString();
         }
 
-        private static string ProcessToken(TextToken token, bool preserveOrder, bool alreadyShaped)
+        private static void AppendRun(StringBuilder sb, string str, Run run, bool preserveOrder, bool alreadyShaped)
         {
-            if (token.Direction == CharDirection.RTL)
-                return alreadyShaped
-                    ? FixerTool.ReverseLine(token.Text.ToString())
-                    : FixerTool.FixLine(token.Text.ToString(), preserveOrder);
+            if (run.Direction == CharDirection.RTL)
+            {
+                string text = str.Substring(run.Start, run.Length);
+                sb.Append(alreadyShaped
+                    ? FixerTool.ReverseLine(text)
+                    : FixerTool.FixLine(text, preserveOrder));
+                return;
+            }
 
-            if (alreadyShaped || FixerTool.DigitStyle == RtlDigitStyle.Western)
-                return token.Text.ToString();
+            RtlDigitStyle digitStyle = FixerTool.DigitStyle;
+            if (alreadyShaped || digitStyle == RtlDigitStyle.Western)
+            {
+                sb.Append(str, run.Start, run.Length);
+                return;
+            }
 
-            var text = token.Text;
-            for (int i = 0; i < text.Length; i++)
-                text[i] = FixerTool.ConvertDigit(text[i], FixerTool.DigitStyle);
-            return text.ToString();
+            int end = run.Start + run.Length;
+            for (int i = run.Start; i < end; i++)
+                sb.Append(FixerTool.ConvertDigit(str[i], digitStyle));
         }
+
+        [ThreadStatic] private static List<Run> _runs;
+        [ThreadStatic] private static StringBuilder _mixedBuilder;
 
         private static string ProcessLines(string str, Func<string, string> processor)
         {
@@ -264,10 +278,18 @@ namespace PicoShot.Localization.Rtl
             Neutral
         }
 
-        private class TextToken
+        private struct Run
         {
+            public readonly int Start;
+            public int Length;
             public CharDirection Direction;
-            public StringBuilder Text = new StringBuilder();
+
+            public Run(int start, int length, CharDirection direction)
+            {
+                Start = start;
+                Length = length;
+                Direction = direction;
+            }
         }
 
         internal static bool IsRtlChar(char c)
@@ -282,7 +304,7 @@ namespace PicoShot.Localization.Rtl
             if (IsRtlChar(c))
                 return CharDirection.RTL;
 
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                 (c >= 0x00C0 && c <= 0x00FF) || (c >= 0x0400 && c <= 0x04FF))
                 return CharDirection.LTR;
 
@@ -400,7 +422,9 @@ namespace PicoShot.Localization.Rtl
 
     internal class ArabicTable
     {
-        private static readonly Dictionary<int, int> MappingDictionary = new();
+        // Every mapped letter lives in the Arabic block U+0600-U+06FF; 0 means "not mapped".
+        private const int MappingBase = 0x0600;
+        private static readonly char[] MappingTable = new char[0x100];
         public static ArabicTable ArabicMapper { get; }
 
         private ArabicTable()
@@ -453,7 +477,7 @@ namespace PicoShot.Localization.Rtl
 
             foreach (var mapping in mapList)
             {
-                MappingDictionary[mapping.From] = mapping.To;
+                MappingTable[mapping.From - MappingBase] = (char)mapping.To;
             }
         }
 
@@ -464,7 +488,11 @@ namespace PicoShot.Localization.Rtl
 
         internal static int Convert(int toBeConverted)
         {
-            return MappingDictionary.GetValueOrDefault(toBeConverted, toBeConverted);
+            int index = toBeConverted - MappingBase;
+            if ((uint)index >= (uint)MappingTable.Length) return toBeConverted;
+
+            char mapped = MappingTable[index];
+            return mapped != 0 ? mapped : toBeConverted;
         }
     }
 
@@ -483,14 +511,15 @@ namespace PicoShot.Localization.Rtl
 
     internal static class FixerTool
     {
-        internal static bool ShowTashkeel = true;
-        internal static bool CombineTashkeel = true;
-        internal static RtlDigitStyle DigitStyle = RtlDigitStyle.ArabicIndic;
-        private static StringBuilder _internalStringBuilder;
+        [ThreadStatic] internal static bool ShowTashkeel;
+        [ThreadStatic] internal static bool CombineTashkeel;
+        [ThreadStatic] internal static RtlDigitStyle DigitStyle;
+        [ThreadStatic] private static StringBuilder _internalStringBuilder;
+        [ThreadStatic] private static List<char> _numberList;
 
         private static StringBuilder InternalStringBuilder => _internalStringBuilder ??= new StringBuilder(1024);
 
-        private static List<TashkeelLocation> _tashkeelLocations;
+        [ThreadStatic] private static List<TashkeelLocation> _tashkeelLocations;
 
         private static List<TashkeelLocation> TashkeelLocations =>
             _tashkeelLocations ??= new List<TashkeelLocation>(64);
@@ -710,7 +739,8 @@ namespace PicoShot.Localization.Rtl
             InternalStringBuilder.Clear();
             InternalStringBuilder.EnsureCapacity(lettersFinal.Length);
 
-            var numberList = new List<char>(16);
+            var numberList = _numberList ??= new List<char>(16);
+            numberList.Clear();
 
             for (var i = lettersFinal.Length - 1; i >= 0; i--)
             {

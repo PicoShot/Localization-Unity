@@ -325,9 +325,11 @@ namespace PicoShot.Localization.Rtl
             return -1;
         }
 
+        private static readonly char[] LineBreakChars = { '\r', '\n' };
+
         private static string RemoveLineBreaks(string value)
         {
-            return value.IndexOfAny(new[] { '\r', '\n' }) < 0
+            return value.IndexOfAny(LineBreakChars) < 0
                 ? value
                 : value.Replace("\r", string.Empty).Replace("\n", string.Empty);
         }
