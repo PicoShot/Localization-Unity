@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using UnityEditor;
+using UnityEditor.ShortcutManagement;
 using UnityEngine;
 using PicoShot.Localization.Editor.Mcp;
 using PicoShot.Localization.Rtl;
@@ -43,6 +45,26 @@ namespace PicoShot.Localization
         private Vector2 _referenceScroll;
         private List<string> _referenceTokens;
         private GUIStyle _previewStyle;
+
+        private struct EditState
+        {
+            public string Text;
+            public int Cursor;
+            public int Select;
+        }
+
+        private const int MaxUndoSteps = 200;
+        private const double UndoGroupSeconds = 0.8d;
+
+        private static readonly FieldInfo RecycledEditorField =
+            typeof(EditorGUI).GetField("s_RecycledEditor", BindingFlags.NonPublic | BindingFlags.Static);
+
+        private readonly List<EditState> _undo = new();
+        private readonly List<EditState> _redo = new();
+        private double _lastEditTime;
+        private bool _breakUndoGroup;
+        private int _pendingHistory;
+        private double _lastHistoryRequest;
 
         private static string ActionKeyName => Application.platform == RuntimePlatform.OSXEditor ? "Cmd" : "Ctrl";
 
@@ -136,6 +158,7 @@ namespace PicoShot.Localization
                 return;
             }
 
+            ApplyPendingHistory();
             HandleKeyboard(Event.current);
 
             if (_isKeyName)
@@ -185,8 +208,11 @@ namespace PicoShot.Localization
                 }
                 else
                 {
+                    var before = CaptureState();
                     GUI.SetNextControlName(TextControlName);
-                    _text = EditorGUILayout.TextArea(_text, Styles.TextArea, GUILayout.ExpandHeight(true));
+                    string newText = EditorGUILayout.TextArea(_text, Styles.TextArea, GUILayout.ExpandHeight(true));
+                    if (newText != _text)
+                        RecordEdit(before, newText);
 
                     if (!_focused)
                     {
@@ -346,8 +372,11 @@ namespace PicoShot.Localization
             GUILayout.Label(_title, Styles.SectionTitle);
             EditorGUILayout.Space(2);
 
+            var before = CaptureState();
             GUI.SetNextControlName(TextControlName);
-            _text = FilterKeyName(EditorGUILayout.TextField(_text));
+            string newName = FilterKeyName(EditorGUILayout.TextField(_text));
+            if (newName != _text)
+                RecordEdit(before, newName);
             if (!_focused)
             {
                 _focused = true;
@@ -407,6 +436,13 @@ namespace PicoShot.Localization
             bool action = EditorGUI.actionKey;
             bool enter = evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter;
 
+            if (action && (evt.keyCode == KeyCode.Z || evt.keyCode == KeyCode.Y))
+            {
+                evt.Use();
+                RequestHistory(evt.keyCode == KeyCode.Y || evt.shift ? 1 : -1);
+                return;
+            }
+
             if ((action && evt.keyCode == KeyCode.S) || (enter && (action || _isKeyName)))
             {
                 evt.Use();
@@ -419,6 +455,122 @@ namespace PicoShot.Localization
                 Cancel(confirm: true);
             }
         }
+
+        #region Undo
+
+        [Shortcut("Localization/Text Editor/Undo", typeof(LocalizationTextEditorPopup), KeyCode.Z, ShortcutModifiers.Action)]
+        private static void UndoShortcut(ShortcutArguments args)
+        {
+            (args.context as LocalizationTextEditorPopup)?.RequestHistory(-1);
+        }
+
+        [Shortcut("Localization/Text Editor/Redo", typeof(LocalizationTextEditorPopup), KeyCode.Y, ShortcutModifiers.Action)]
+        private static void RedoShortcut(ShortcutArguments args)
+        {
+            (args.context as LocalizationTextEditorPopup)?.RequestHistory(1);
+        }
+
+        [Shortcut("Localization/Text Editor/Redo (Shift)", typeof(LocalizationTextEditorPopup), KeyCode.Z, ShortcutModifiers.Action | ShortcutModifiers.Shift)]
+        private static void RedoShiftShortcut(ShortcutArguments args)
+        {
+            (args.context as LocalizationTextEditorPopup)?.RequestHistory(1);
+        }
+
+        /// <summary>
+        /// Queues an undo (-1) or redo (+1) for the next Layout event, where the text can change safely.
+        /// The shortcut and the key fallback can both fire for one key press, so near-simultaneous requests are merged.
+        /// </summary>
+        private void RequestHistory(int direction)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            if (_pendingHistory != 0 || now - _lastHistoryRequest < 0.05d)
+                return;
+
+            _lastHistoryRequest = now;
+            _pendingHistory = direction;
+            Repaint();
+        }
+
+        private void ApplyPendingHistory()
+        {
+            if (_pendingHistory == 0 || Event.current.type != EventType.Layout)
+                return;
+
+            int direction = _pendingHistory;
+            _pendingHistory = 0;
+
+            var from = direction < 0 ? _undo : _redo;
+            var to = direction < 0 ? _redo : _undo;
+            if (from.Count == 0)
+                return;
+
+            to.Add(CaptureState());
+            var state = from[from.Count - 1];
+            from.RemoveAt(from.Count - 1);
+
+            _text = state.Text;
+            _breakUndoGroup = true;
+
+            // The focused field keeps its own copy of the text; update it so the change shows and the caret lands right
+            var editor = GetActiveEditor();
+            if (editor != null)
+            {
+                editor.text = _text;
+                editor.cursorIndex = Mathf.Clamp(state.Cursor, 0, _text.Length);
+                editor.selectIndex = Mathf.Clamp(state.Select, 0, _text.Length);
+            }
+            else
+            {
+                GUIUtility.keyboardControl = 0;
+            }
+
+            Repaint();
+        }
+
+        /// <summary>
+        /// Saves the text before a change. Typing within a short pause is one step; a word boundary,
+        /// a paste, or a cut starts a new one.
+        /// </summary>
+        private void RecordEdit(EditState before, string newText)
+        {
+            double now = EditorApplication.timeSinceStartup;
+            int lengthChange = Math.Abs(newText.Length - before.Text.Length);
+            bool newGroup = _undo.Count == 0 || _breakUndoGroup || lengthChange > 1 || now - _lastEditTime > UndoGroupSeconds;
+
+            if (newGroup)
+            {
+                _undo.Add(before);
+                if (_undo.Count > MaxUndoSteps)
+                    _undo.RemoveAt(0);
+            }
+
+            _redo.Clear();
+            _lastEditTime = now;
+            _text = newText;
+
+            _breakUndoGroup = newText.Length > before.Text.Length && newText.Length > 0 && char.IsWhiteSpace(newText[newText.Length - 1]);
+        }
+
+        private EditState CaptureState()
+        {
+            var editor = GetActiveEditor();
+            int cursor = editor != null ? editor.cursorIndex : _text.Length;
+            int select = editor != null ? editor.selectIndex : cursor;
+            return new EditState { Text = _text, Cursor = cursor, Select = select };
+        }
+
+        /// <summary>
+        /// The editor Unity uses for the text field being typed in, or null when our field isn't focused.
+        /// </summary>
+        private static TextEditor GetActiveEditor()
+        {
+            if (GUI.GetNameOfFocusedControl() != TextControlName || !EditorGUIUtility.editingTextField)
+                return null;
+
+            return RecycledEditorField?.GetValue(null) as TextEditor;
+        }
+
+        #endregion
 
         private void Save()
         {
