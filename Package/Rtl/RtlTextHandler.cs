@@ -243,12 +243,12 @@ namespace PicoShot.Localization.Rtl
 
         private static CharDirection GetCharDirection(char c)
         {
-            if (c >= 0x0590 && c <= 0x08FF || 
-                c >= 0xFB1D && c <= 0xFDFF || 
+            if (c >= 0x0590 && c <= 0x08FF ||
+                c >= 0xFB1D && c <= 0xFDFF ||
                 c >= 0xFE70 && c <= 0xFEFF)
                 return CharDirection.RTL;
 
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                 (c >= 0x00C0 && c <= 0x00FF) || (c >= 0x0400 && c <= 0x04FF))
                 return CharDirection.LTR;
 
@@ -471,8 +471,8 @@ namespace PicoShot.Localization.Rtl
             var lastSplitIndex = 0;
             InternalStringBuilder.Clear();
             InternalStringBuilder.EnsureCapacity(str.Length);
-
-            var index = 0;
+            var mergedCount = 0;
+            var lastMarkIndex = -2;
 
             for (var i = 0; i < str.Length; i++)
             {
@@ -481,107 +481,42 @@ namespace PicoShot.Localization.Rtl
 
                 switch (currentChar)
                 {
+                    // Tanween Fatha, Tanween Damma, Tanween Kasra, Sukun, Maddah
                     case (char)0x064B:
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x064B, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Tanween Damma
                     case (char)0x064C:
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x064C, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Tanween Kasra
                     case (char)0x064D:
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x064D, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Fatha
-                    case (char)0x064E:
-                        if (index > 0 && CombineTashkeel && tashkeelLocations[index - 1].Tashkeel == (char)0x0651)
-                        {
-                            tashkeelLocations[index - 1].Tashkeel = (char)0xFC60;
-                            shouldRemove = true;
-                            break;
-                        }
-
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x064E, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Damma
-                    case (char)0x064F:
-                        if (index > 0 && CombineTashkeel && tashkeelLocations[index - 1].Tashkeel == (char)0x0651)
-                        {
-                            tashkeelLocations[index - 1].Tashkeel = (char)0xFC61;
-                            shouldRemove = true;
-                            break;
-                        }
-
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x064F, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Kasra
-                    case (char)0x0650:
-                        if (index > 0 && CombineTashkeel && tashkeelLocations[index - 1].Tashkeel == (char)0x0651)
-                        {
-                            tashkeelLocations[index - 1].Tashkeel = (char)0xFC62;
-                            shouldRemove = true;
-                            break;
-                        }
-
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x0650, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Shadda
-                    case (char)0x0651:
-                        if (index > 0 && CombineTashkeel)
-                        {
-                            if (tashkeelLocations[index - 1].Tashkeel == (char)0x064E)
-                            {
-                                tashkeelLocations[index - 1].Tashkeel = (char)0xFC60;
-                                shouldRemove = true;
-                                break;
-                            }
-
-                            if (tashkeelLocations[index - 1].Tashkeel == (char)0x064F)
-                            {
-                                tashkeelLocations[index - 1].Tashkeel = (char)0xFC61;
-                                shouldRemove = true;
-                                break;
-                            }
-
-                            if (tashkeelLocations[index - 1].Tashkeel == (char)0x0650)
-                            {
-                                tashkeelLocations[index - 1].Tashkeel = (char)0xFC62;
-                                shouldRemove = true;
-                                break;
-                            }
-                        }
-
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x0651, i));
-                        shouldRemove = true;
-                        break;
-
-                    // Sukun
                     case (char)0x0652:
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x0652, i));
+                    case (char)0x0653:
+                        tashkeelLocations.Add(new TashkeelLocation(currentChar, i - mergedCount));
                         shouldRemove = true;
                         break;
 
-                    // Maddah
-                    case (char)0x0653:
-                        tashkeelLocations.Add(new TashkeelLocation((char)0x0653, i));
+                    // Fatha, Damma, Kasra, Shadda
+                    case (char)0x064E:
+                    case (char)0x064F:
+                    case (char)0x0650:
+                    case (char)0x0651:
+                        if (CombineTashkeel && lastMarkIndex == i - 1 && tashkeelLocations.Count > 0)
+                        {
+                            var previous = tashkeelLocations[tashkeelLocations.Count - 1];
+                            char combined = CombineShadda(previous.Tashkeel, currentChar);
+                            if (combined != '\0')
+                            {
+                                previous.Tashkeel = combined;
+                                mergedCount++;
+                                shouldRemove = true;
+                                break;
+                            }
+                        }
+
+                        tashkeelLocations.Add(new TashkeelLocation(currentChar, i - mergedCount));
                         shouldRemove = true;
                         break;
 
                     case (char)0xFC60:
                     case (char)0xFC61:
                     case (char)0xFC62:
+                        tashkeelLocations.Add(new TashkeelLocation(currentChar, i - mergedCount));
                         shouldRemove = true;
                         break;
                 }
@@ -594,10 +529,7 @@ namespace PicoShot.Localization.Rtl
                     }
 
                     lastSplitIndex = i + 1;
-                    if (currentChar != (char)0xFC60 && currentChar != (char)0xFC61 && currentChar != (char)0xFC62)
-                    {
-                        index++;
-                    }
+                    lastMarkIndex = i;
                 }
             }
 
@@ -610,6 +542,25 @@ namespace PicoShot.Localization.Rtl
             {
                 str = InternalStringBuilder.ToString();
             }
+        }
+
+        /// <summary>
+        /// Returns the ligature for Shadda combined with Fatha/Damma/Kasra (in either order), or '\0'.
+        /// </summary>
+        private static char CombineShadda(char first, char second)
+        {
+            char vowel;
+            if (first == (char)0x0651) vowel = second;
+            else if (second == (char)0x0651) vowel = first;
+            else return '\0';
+
+            return vowel switch
+            {
+                (char)0x064E => (char)0xFC60,
+                (char)0x064F => (char)0xFC61,
+                (char)0x0650 => (char)0xFC62,
+                _ => '\0'
+            };
         }
 
         private static void ReturnTashkeel(ref char[] letters, List<TashkeelLocation> tashkeelLocation)
