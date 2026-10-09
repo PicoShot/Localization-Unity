@@ -318,9 +318,12 @@ namespace PicoShot.Localization.Editor.Mcp
                     "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32000,\"message\":\"Forbidden: cross-origin POST rejected.\"}}");
                 return;
             }
-            string body;
-            using (var reader = new StreamReader(request.InputStream, Encoding.UTF8))
-                body = reader.ReadToEnd();
+            string body = ReadBody(request.InputStream);
+            if (body == null)
+            {
+                WriteText(context, 413, "application/json", "{\"error\":\"Request too large.\"}");
+                return;
+            }
             if (string.IsNullOrWhiteSpace(body))
             {
                 WriteText(context, 400, "application/json", "{\"error\":\"Empty request body.\"}");
@@ -355,6 +358,26 @@ namespace PicoShot.Localization.Editor.Mcp
                 return;
             }
             WriteText(context, httpStatus, "application/json", responseJson);
+        }
+
+        /// <summary>Reads a UTF-8 body, or returns null when it exceeds <see cref="MaxRequestBytes"/> (covers chunked requests).</summary>
+        private static string ReadBody(Stream input)
+        {
+            using (var buffer = new MemoryStream())
+            {
+                byte[] chunk = new byte[81920];
+                int read;
+                while ((read = input.Read(chunk, 0, chunk.Length)) > 0)
+                {
+                    if (buffer.Length + read > MaxRequestBytes)
+                        return null;
+                    buffer.Write(chunk, 0, read);
+                }
+                byte[] bytes = buffer.GetBuffer();
+                int length = (int)buffer.Length;
+                int start = length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF ? 3 : 0;
+                return Encoding.UTF8.GetString(bytes, start, length - start);
+            }
         }
 
         private static bool IsAllowedOrigin(string origin)
@@ -462,9 +485,13 @@ namespace PicoShot.Localization.Editor.Mcp
 
             public string DefaultLanguage => _inner.DefaultLanguage;
 
-            public Dictionary<string, Dictionary<string, object>> LoadAll() => _inner.LoadAll();
+            public McpLocaleSnapshot Load() => _inner.Load();
 
-            public bool IsValidLanguage(string languageCode) => _inner.IsValidLanguage(languageCode);
+            public string NormalizeLanguage(string languageCode) => _inner.NormalizeLanguage(languageCode);
+
+            public string GetLanguageName(string languageCode) => _inner.GetLanguageName(languageCode);
+
+            public bool IsRightToLeft(string languageCode) => _inner.IsRightToLeft(languageCode);
 
             public void SaveLanguage(string languageCode, Dictionary<string, object> keys)
             {

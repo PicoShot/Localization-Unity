@@ -364,6 +364,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     ["name"] = ServerName,
                     ["version"] = ServerVersion,
                 },
+                ["instructions"] = McpTools.Instructions,
             };
         }
 
@@ -380,10 +381,7 @@ namespace PicoShot.Localization.Editor.Mcp
                     ["tools"] = new Dictionary<string, object>(StringComparer.Ordinal),
                     ["resources"] = new Dictionary<string, object>(StringComparer.Ordinal),
                 },
-                ["instructions"] = "Unity localization server. Use list_languages and validate to find gaps, " +
-                    "add_key to create keys (fans out to every language), get_key or locales://{lang} resources to read, " +
-                    "and set_translation / set_translations (max 500 items per call) to write translations. " +
-                    "Keys are unique case-insensitively; values are strings or string arrays.",
+                ["instructions"] = McpTools.Instructions,
                 ["ttlMs"] = 3600000L,
                 ["cacheScope"] = "public",
             };
@@ -392,7 +390,7 @@ namespace PicoShot.Localization.Editor.Mcp
         private static Dictionary<string, object> ListResources(McpLocalesStore store)
         {
             var resources = new List<object>();
-            foreach (string lang in store.ListLanguages())
+            foreach (string lang in store.Snapshot().Languages)
             {
                 resources.Add(new Dictionary<string, object>(StringComparer.Ordinal)
                 {
@@ -408,32 +406,15 @@ namespace PicoShot.Localization.Editor.Mcp
         {
             const string prefix = "locales://";
             if (!uri.StartsWith(prefix, StringComparison.Ordinal)) return (false, null);
-            string lang = uri.Substring(prefix.Length);
-            var all = store.LoadAll();
-            string actual = null;
-            foreach (var existing in all.Keys)
-            {
-                if (string.Equals(existing, lang, StringComparison.OrdinalIgnoreCase))
-                {
-                    actual = existing;
-                    break;
-                }
-            }
+            var snap = store.Snapshot();
+            string actual = snap.ResolveLanguage(uri.Substring(prefix.Length));
             if (actual == null) return (false, null);
-            var wire = new Dictionary<string, object>(StringComparer.Ordinal);
-            foreach (var kvp in all[actual])
+            var data = snap.GetLanguage(actual);
+            var wire = new Dictionary<string, object>(data.Count, StringComparer.Ordinal);
+            foreach (string key in snap.Keys)
             {
-                if (kvp.Value is List<string> list)
-                {
-                    var wired = new List<object>(list.Count);
-                    foreach (string s in list)
-                        wired.Add(s ?? string.Empty);
-                    wire[kvp.Key] = wired;
-                }
-                else
-                {
-                    wire[kvp.Key] = kvp.Value?.ToString() ?? string.Empty;
-                }
+                if (data.TryGetValue(key, out object value))
+                    wire[key] = value;
             }
             return (true, new Dictionary<string, object>(StringComparer.Ordinal)
             {
