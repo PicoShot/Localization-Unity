@@ -27,18 +27,19 @@ namespace PicoShot.Localization.Rtl
             string logicalText,
             bool supportMixedText,
             bool isMainRtl,
-            bool richTextEnabled)
+            bool richTextEnabled,
+            RtlDigitStyle digitStyle)
         {
             if (string.IsNullOrEmpty(logicalText)) return logicalText;
 
             if (!richTextEnabled || logicalText.IndexOf('<') < 0)
-                return RtlTextHandler.Shape(logicalText, supportMixedText, isMainRtl);
+                return RtlTextHandler.Shape(logicalText, supportMixedText, isMainRtl, digitStyle);
 
             ProtectedText protectedText = ProtectTags(
                 logicalText,
                 swapPairedTags: false,
                 preserveJoiningAcrossTags: true);
-            string shaped = RtlTextHandler.Shape(protectedText.Text, supportMixedText, isMainRtl);
+            string shaped = RtlTextHandler.Shape(protectedText.Text, supportMixedText, isMainRtl, digitStyle);
             return RestoreTags(shaped, protectedText.Replacements);
         }
 

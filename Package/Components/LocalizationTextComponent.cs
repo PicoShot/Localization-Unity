@@ -437,7 +437,8 @@ namespace PicoShot.Localization
                     _originalLogicalText,
                     supportMixedText,
                     isMainRtl: true,
-                    _tmpText.richText);
+                    _tmpText.richText,
+                    LocalizationManager.CurrentDigitStyle);
 
                 // TMP measures the same shaped glyphs used by the final visual text,
                 // but in logical order so its line sequence remains top-to-bottom.
@@ -513,7 +514,8 @@ namespace PicoShot.Localization
                 logicalText,
                 supportMixedText,
                 isMainRtl: true,
-                _tmpText.richText);
+                _tmpText.richText,
+                LocalizationManager.CurrentDigitStyle);
             return RtlTextMeshProHandler.ReverseMeasuredLine(
                 shaped,
                 supportMixedText,

@@ -1,21 +1,46 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 
 namespace PicoShot.Localization.Rtl
 {
+    /// <summary>
+    /// Which digit glyphs RTL text should use.
+    /// </summary>
+    public enum RtlDigitStyle
+    {
+        /// <summary>0123456789 (Hebrew, Yiddish, and any LTR text).</summary>
+        Western,
+
+        /// <summary>Arabic-Indic digits U+0660-0669 (Arabic, Sorani Kurdish).</summary>
+        ArabicIndic,
+
+        /// <summary>Extended Arabic-Indic digits U+06F0-06F9 (Persian, Dari, Pashto, Urdu).</summary>
+        ExtendedArabicIndic
+    }
+
     public static class RtlTextHandler
     {
-        private static readonly StringBuilder StringBuilder = new(1024);
-
         public static string Fix(string str)
         {
-            return FixInternal(str, false, true, false);
+            return FixInternal(str, false, true, RtlDigitStyle.ArabicIndic, false);
         }
 
-        internal static string Fix(string str, bool preserveOrder)
+        public static string Fix(string str, RtlDigitStyle digitStyle)
         {
-            return FixInternal(str, false, true, preserveOrder);
+            return FixInternal(str, false, true, digitStyle, false);
+        }
+
+        internal static string Fix(string str, bool preserveOrder, RtlDigitStyle digitStyle)
+        {
+            return FixInternal(str, false, true, digitStyle, preserveOrder);
+        }
+
+        public static string Fix(string str, bool showTashkeel, bool combineTashkeel, bool useHinduNumbers)
+        {
+            return FixInternal(str, showTashkeel, combineTashkeel,
+                useHinduNumbers ? RtlDigitStyle.ArabicIndic : RtlDigitStyle.Western, false);
         }
 
         /// <summary>
@@ -23,11 +48,11 @@ namespace PicoShot.Localization.Rtl
         /// string can be measured by TextMeshPro and later passed to Reverse or
         /// ReverseMixed without reshaping it a second time.
         /// </summary>
-        internal static string Shape(string str, bool supportMixedText, bool isMainRtl)
+        internal static string Shape(string str, bool supportMixedText, bool isMainRtl, RtlDigitStyle digitStyle)
         {
             return supportMixedText
-                ? FixMixed(str, isMainRtl, true)
-                : Fix(str, true);
+                ? FixMixedInternal(str, isMainRtl, digitStyle, preserveOrder: true, alreadyShaped: false)
+                : Fix(str, true, digitStyle);
         }
 
         internal static string Reverse(string str)
@@ -37,63 +62,81 @@ namespace PicoShot.Localization.Rtl
 
         internal static string ReverseMixed(string str, bool isMainRtl)
         {
-            return FixMixedInternal(str, isMainRtl, false, true);
-        }
-
-        private static string FixInternal(string str, bool showTashkeel, bool useHinduNumbers, bool preserveOrder)
-        {
-            FixerTool.ShowTashkeel = showTashkeel;
-            FixerTool.UseHinduNumbers = useHinduNumbers;
-
-            if (str.Contains("\n") && !str.Contains(Environment.NewLine))
-            {
-                str = str.Replace("\n", Environment.NewLine);
-            }
-
-            if (!str.Contains(Environment.NewLine))
-            {
-                return FixerTool.FixLine(str, preserveOrder);
-            }
-
-            var stringSeparators = new[] { Environment.NewLine };
-            var strSplit = str.Split(stringSeparators, StringSplitOptions.None);
-
-            if (strSplit.Length <= 1)
-            {
-                return FixerTool.FixLine(str, preserveOrder);
-            }
-
-            StringBuilder.Clear();
-            StringBuilder.EnsureCapacity(str.Length);
-
-            StringBuilder.Append(FixerTool.FixLine(strSplit[0], preserveOrder));
-
-            for (int i = 1; i < strSplit.Length; i++)
-            {
-                StringBuilder.Append(Environment.NewLine);
-                StringBuilder.Append(FixerTool.FixLine(strSplit[i], preserveOrder));
-            }
-
-            return StringBuilder.ToString();
-        }
-
-        public static string Fix(string str, bool showTashkeel, bool combineTashkeel, bool useHinduNumbers)
-        {
-            FixerTool.CombineTashkeel = combineTashkeel;
-            return FixInternal(str, showTashkeel, useHinduNumbers, false);
+            return FixMixedInternal(str, isMainRtl, RtlDigitStyle.Western, preserveOrder: false, alreadyShaped: true);
         }
 
         public static string FixMixed(string str, bool isMainRtl)
         {
-            return FixMixed(str, isMainRtl, false);
+            return FixMixedInternal(str, isMainRtl, RtlDigitStyle.ArabicIndic, preserveOrder: false, alreadyShaped: false);
         }
 
-        internal static string FixMixed(string str, bool isMainRtl, bool preserveOrder)
+        public static string FixMixed(string str, bool isMainRtl, RtlDigitStyle digitStyle)
         {
-            return FixMixedInternal(str, isMainRtl, preserveOrder, false);
+            return FixMixedInternal(str, isMainRtl, digitStyle, preserveOrder: false, alreadyShaped: false);
         }
 
-        private static string FixMixedInternal(string str, bool isMainRtl, bool preserveOrder, bool alreadyShaped)
+        /// <summary>
+        /// Gets the digit style conventionally used by an RTL language.
+        /// Returns <see cref="RtlDigitStyle.Western"/> for unknown and LTR languages.
+        /// </summary>
+        public static RtlDigitStyle GetDigitStyle(string languageCode)
+        {
+            if (string.IsNullOrEmpty(languageCode)) return RtlDigitStyle.Western;
+
+            int separator = languageCode.IndexOfAny(LanguageSeparators);
+            string baseCode = separator > 0 ? languageCode.Substring(0, separator) : languageCode;
+
+            switch (baseCode.ToLowerInvariant())
+            {
+                case "ar":
+                case "ckb":
+                    return RtlDigitStyle.ArabicIndic;
+                case "fa":
+                case "prs":
+                case "ps":
+                case "ur":
+                    return RtlDigitStyle.ExtendedArabicIndic;
+                default:
+                    return RtlDigitStyle.Western;
+            }
+        }
+
+        private static readonly char[] LanguageSeparators = { '-', '_' };
+
+        private static string FixInternal(string str, bool showTashkeel, bool combineTashkeel, RtlDigitStyle digitStyle, bool preserveOrder)
+        {
+            if (string.IsNullOrEmpty(str)) return str;
+
+            FixerTool.ShowTashkeel = showTashkeel;
+            FixerTool.CombineTashkeel = combineTashkeel;
+            FixerTool.DigitStyle = digitStyle;
+
+            if (str.IndexOf('\n') < 0 && str.IndexOf('\r') < 0)
+                return FixerTool.FixLine(str, preserveOrder);
+
+            return ProcessLines(str, preserveOrder ? FixLinePreservingOrder : FixLineReversed);
+        }
+
+        private static readonly Func<string, string> FixLinePreservingOrder = line => FixerTool.FixLine(line, true);
+        private static readonly Func<string, string> FixLineReversed = line => FixerTool.FixLine(line, false);
+
+        private static string FixMixedInternal(string str, bool isMainRtl, RtlDigitStyle digitStyle, bool preserveOrder, bool alreadyShaped)
+        {
+            if (string.IsNullOrEmpty(str)) return str;
+
+            FixerTool.ShowTashkeel = false;
+            FixerTool.CombineTashkeel = true;
+            // Digits only take a localized form when the paragraph itself is RTL.
+            FixerTool.DigitStyle = isMainRtl ? digitStyle : RtlDigitStyle.Western;
+
+            // Bidi reordering applies per line; reordering across line breaks would swap lines.
+            if (str.IndexOf('\n') < 0 && str.IndexOf('\r') < 0)
+                return FixMixedLine(str, isMainRtl, preserveOrder, alreadyShaped);
+
+            return ProcessLines(str, line => FixMixedLine(line, isMainRtl, preserveOrder, alreadyShaped));
+        }
+
+        private static string FixMixedLine(string str, bool isMainRtl, bool preserveOrder, bool alreadyShaped)
         {
             if (string.IsNullOrEmpty(str)) return str;
 
@@ -106,31 +149,22 @@ namespace PicoShot.Localization.Rtl
                 char c = str[i];
                 CharDirection dir = GetCharDirection(c);
 
-                if (currentToken == null)
+                // Combining marks belong to the character they follow.
+                if (currentToken != null && dir == CharDirection.Neutral &&
+                    CharUnicodeInfo.GetUnicodeCategory(c) == UnicodeCategory.NonSpacingMark)
+                {
+                    currentToken.Text.Append(c);
+                    continue;
+                }
+
+                if (currentToken == null || dir != currentDir)
                 {
                     currentDir = dir;
                     currentToken = new TextToken { Direction = dir };
-                    currentToken.Text.Append(c);
                     rawTokens.Add(currentToken);
                 }
-                else if (dir == currentDir || (dir == CharDirection.Neutral && currentDir == CharDirection.Neutral))
-                {
-                    currentToken.Text.Append(c);
-                }
-                else if (dir == CharDirection.Neutral)
-                {
-                    currentDir = dir;
-                    currentToken = new TextToken { Direction = dir };
-                    currentToken.Text.Append(c);
-                    rawTokens.Add(currentToken);
-                }
-                else
-                {
-                    currentDir = dir;
-                    currentToken = new TextToken { Direction = dir };
-                    currentToken.Text.Append(c);
-                    rawTokens.Add(currentToken);
-                }
+
+                currentToken.Text.Append(c);
             }
 
             CharDirection mainDir = isMainRtl ? CharDirection.RTL : CharDirection.LTR;
@@ -193,21 +227,16 @@ namespace PicoShot.Localization.Rtl
         {
             if (token.Direction == CharDirection.RTL)
                 return alreadyShaped
-                    ? Reverse(token.Text.ToString())
-                    : Fix(token.Text.ToString(), preserveOrder);
+                    ? FixerTool.ReverseLine(token.Text.ToString())
+                    : FixerTool.FixLine(token.Text.ToString(), preserveOrder);
 
-            // Convert numbers in LTR tokens if needed, without reversing
-            var text = token.Text.ToString();
-            var sb = new StringBuilder(text.Length);
+            if (alreadyShaped || FixerTool.DigitStyle == RtlDigitStyle.Western)
+                return token.Text.ToString();
+
+            var text = token.Text;
             for (int i = 0; i < text.Length; i++)
-            {
-                char c = text[i];
-                if (char.IsDigit(c) && c >= '0' && c <= '9')
-                    sb.Append((char)FixerTool.HandleInduNumber(c, c));
-                else
-                    sb.Append(c);
-            }
-            return sb.ToString();
+                text[i] = FixerTool.ConvertDigit(text[i], FixerTool.DigitStyle);
+            return text.ToString();
         }
 
         private static string ProcessLines(string str, Func<string, string> processor)
@@ -218,7 +247,7 @@ namespace PicoShot.Localization.Rtl
             if (normalized.IndexOf('\n') < 0)
                 return processor(normalized);
 
-            string[] lines = normalized.Split(new[] { '\n' }, StringSplitOptions.None);
+            string[] lines = normalized.Split('\n');
             var sb = new StringBuilder(normalized.Length);
             for (int i = 0; i < lines.Length; i++)
             {
@@ -241,14 +270,19 @@ namespace PicoShot.Localization.Rtl
             public StringBuilder Text = new StringBuilder();
         }
 
+        internal static bool IsRtlChar(char c)
+        {
+            return c >= 0x0590 && c <= 0x08FF ||
+                   c >= 0xFB1D && c <= 0xFDFF ||
+                   c >= 0xFE70 && c <= 0xFEFF;
+        }
+
         private static CharDirection GetCharDirection(char c)
         {
-            if (c >= 0x0590 && c <= 0x08FF ||
-                c >= 0xFB1D && c <= 0xFDFF ||
-                c >= 0xFE70 && c <= 0xFEFF)
+            if (IsRtlChar(c))
                 return CharDirection.RTL;
 
-            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || 
                 (c >= 0x00C0 && c <= 0x00FF) || (c >= 0x0400 && c <= 0x04FF))
                 return CharDirection.LTR;
 
@@ -451,7 +485,7 @@ namespace PicoShot.Localization.Rtl
     {
         internal static bool ShowTashkeel = true;
         internal static bool CombineTashkeel = true;
-        internal static bool UseHinduNumbers;
+        internal static RtlDigitStyle DigitStyle = RtlDigitStyle.ArabicIndic;
         private static StringBuilder _internalStringBuilder;
 
         private static StringBuilder InternalStringBuilder => _internalStringBuilder ??= new StringBuilder(1024);
@@ -641,9 +675,9 @@ namespace PicoShot.Localization.Rtl
                 if (skip)
                     i++;
 
-                if (UseHinduNumbers)
+                if (DigitStyle != RtlDigitStyle.Western && lettersOrigin[i] >= '0' && lettersOrigin[i] <= '9')
                 {
-                    lettersFinal[i] = (char)HandleInduNumber(lettersOrigin[i], lettersFinal[i]);
+                    lettersFinal[i] = ConvertDigit(lettersOrigin[i], DigitStyle);
                 }
             }
 
@@ -751,21 +785,18 @@ namespace PicoShot.Localization.Rtl
             }
         }
 
-        internal static ushort HandleInduNumber(ushort letterOrigin, ushort letterFinal)
+        /// <summary>
+        /// Converts an ASCII digit to the requested digit style. Any other character is returned unchanged.
+        /// </summary>
+        internal static char ConvertDigit(char c, RtlDigitStyle style)
         {
-            return letterOrigin switch
+            if (c < '0' || c > '9') return c;
+
+            return style switch
             {
-                0x0030 => 0x0660,
-                0x0031 => 0x0661,
-                0x0032 => 0x0662,
-                0x0033 => 0x0663,
-                0x0034 => 0x0664,
-                0x0035 => 0x0665,
-                0x0036 => 0x0666,
-                0x0037 => 0x0667,
-                0x0038 => 0x0668,
-                0x0039 => 0x0669,
-                _ => letterFinal
+                RtlDigitStyle.ArabicIndic => (char)(0x0660 + (c - '0')),
+                RtlDigitStyle.ExtendedArabicIndic => (char)(0x06F0 + (c - '0')),
+                _ => c
             };
         }
 

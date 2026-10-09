@@ -144,6 +144,11 @@ namespace PicoShot.Localization
         public static bool IsInitialized => _isInitialized;
         public static bool IsRightToLeft => LanguageDefinitions.IsRightToLeft(_currentLanguageCode);
 
+        /// <summary>
+        /// Digit glyphs used when rendering the current language.
+        /// </summary>
+        public static RtlDigitStyle CurrentDigitStyle => RtlTextHandler.GetDigitStyle(_currentLanguageCode);
+
 #if UNITY_EDITOR
         public static IEnumerable<string> AllTranslationKeys
         {
@@ -574,16 +579,7 @@ namespace PicoShot.Localization
                 text = string.Format(text, resolvedArgs);
             }
 
-            if (LocalizationConfigProvider.Config.SupportMixedText)
-            {
-                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
-            }
-            else if (IsRightToLeft)
-            {
-                text = RtlTextHandler.Fix(text);
-            }
-
-            return text;
+            return ApplyRtl(text);
         }
 
         internal static string GetLogicalText(string key, params object[] args)
@@ -665,16 +661,20 @@ namespace PicoShot.Localization
                 text = string.Format(text, resolvedArgs);
             }
 
-            if (LocalizationConfigProvider.Config.SupportMixedText)
-            {
-                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
-            }
-            else if (IsRightToLeft)
-            {
-                text = RtlTextHandler.Fix(text);
-            }
+            return ApplyRtl(text);
+        }
 
-            return text;
+        /// <summary>
+        /// Converts logical text into the visual form required by the current language.
+        /// </summary>
+        private static string ApplyRtl(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return text;
+
+            if (LocalizationConfigProvider.Config.SupportMixedText)
+                return RtlTextHandler.FixMixed(text, IsRightToLeft, CurrentDigitStyle);
+
+            return IsRightToLeft ? RtlTextHandler.Fix(text, CurrentDigitStyle) : text;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -715,16 +715,7 @@ namespace PicoShot.Localization
             }
             //*
 
-            if (LocalizationConfigProvider.Config.SupportMixedText)
-            {
-                text = RtlTextHandler.FixMixed(text, IsRightToLeft);
-            }
-            else if (IsRightToLeft)
-            {
-                text = RtlTextHandler.Fix(text);
-            }
-
-            return text;
+            return ApplyRtl(text);
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -845,19 +836,9 @@ namespace PicoShot.Localization
             if (array == null)
                 return null;
 
-            if (LocalizationConfigProvider.Config.SupportMixedText)
+            for (int i = 0; i < array.Length; i++)
             {
-                for (int i = 0; i < array.Length; i++)
-                {
-                    array[i] = RtlTextHandler.FixMixed(array[i], IsRightToLeft);
-                }
-            }
-            else if (IsRightToLeft)
-            {
-                for (int i = 0; i < array.Length; i++)
-                {
-                    array[i] = RtlTextHandler.Fix(array[i]);
-                }
+                array[i] = ApplyRtl(array[i]);
             }
 
             _arrayCache[keyHash] = array;
