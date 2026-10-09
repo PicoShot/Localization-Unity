@@ -226,6 +226,20 @@ namespace PicoShot.Localization
         }
 
         /// <summary>
+        /// Opens the Keys tab showing all keys that match a status filter, or that are untranslated in one language.
+        /// </summary>
+        public void ShowKeysFiltered(KeyStatusFilter status, string untranslatedLanguage = null)
+        {
+            _data.KeySearchFilter = "";
+            _data.SelectedView = "";
+            _data.ShowArrayKeysOnly = false;
+            _data.ShowStringKeysOnly = false;
+            _data.StatusFilter = status;
+            _data.UntranslatedLanguageFilter = untranslatedLanguage;
+            SwitchToTab(EditorTab.Keys);
+        }
+
+        /// <summary>
         /// Opens the Keys tab with the given key selected, clearing filters that would hide it.
         /// </summary>
         public void ShowKey(string key)

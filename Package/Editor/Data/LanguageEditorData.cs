@@ -83,25 +83,15 @@ namespace PicoShot.Localization.Editor.Data
         /// </summary>
         public bool SearchInTranslations { get; set; } = true;
 
-        // Foldouts
-        public bool ShowStatusSection { get; set; } = true;
-        public bool ShowTestingTools { get; set; } = true;
-        public bool ShowParameterList { get; set; }
-
         // UI State
         public float KeysListPanelWidth { get; set; } = 200f;
         public Vector2 KeysListScroll { get; set; }
         public Vector2 KeyDetailsScroll { get; set; }
         public Vector2 LanguageScrollPos { get; set; }
-        public Vector2 MainScrollPosition { get; set; }
-        public Vector2 ToolsScrollPosition { get; set; }
-        public Vector2 CharsetLanguageScrollPos { get; set; }
 
         // Test Data
         public string TestKey { get; set; } = "";
         public string TestRtl { get; set; } = "";
-        public string TestKeyWithParams { get; set; } = "";
-        public string TestResult { get; set; } = "";
         public List<string> ParameterList { get; set; } = new();
 
         // Component Management
@@ -113,8 +103,6 @@ namespace PicoShot.Localization.Editor.Data
         public Dictionary<string, Dictionary<string, object>> LanguageData { get; private set; } = new();
         public Dictionary<string, bool> KeyFoldouts { get; } = new();
         public Dictionary<string, bool> LanguageSelectionForCharset { get; } = new();
-        public string GeneratedCharset { get; private set; } = "";
-        public bool HasGeneratedCharset { get; private set; }
 
         /// <summary>
         /// Languages removed in the editor whose locale files are deleted on the next save.
@@ -592,8 +580,6 @@ namespace PicoShot.Localization.Editor.Data
             PendingRemovedLanguages.Clear();
             UntranslatedLanguageFilter = null;
             _history?.Clear();
-            GeneratedCharset = "";
-            HasGeneratedCharset = false;
         }
 
         /// <summary>
@@ -876,7 +862,7 @@ namespace PicoShot.Localization.Editor.Data
             // Add new languages
             foreach (var lang in LanguageCodes.Where(lang => !LanguageSelectionForCharset.ContainsKey(lang)))
             {
-                LanguageSelectionForCharset[lang] = false;
+                LanguageSelectionForCharset[lang] = true;
             }
 
             // Remove old languages
@@ -884,50 +870,6 @@ namespace PicoShot.Localization.Editor.Data
             foreach (var lang in LanguageSelectionForCharset.Keys.ToList().Where(lang => !currentLanguages.Contains(lang)))
             {
                 LanguageSelectionForCharset.Remove(lang);
-            }
-        }
-
-        /// <summary>
-        /// Generates one deduplicated, consistently ordered character set for all selected languages.
-        /// </summary>
-        public void GenerateCharset()
-        {
-            var charSet = new HashSet<char>();
-
-            foreach (var lang in LanguageCodes.Where(l => LanguageSelectionForCharset[l]))
-            {
-                foreach (var key in Keys)
-                {
-                    if (LanguageData[key].TryGetValue(lang, out var value))
-                        AddValueToCharset(value, charSet);
-                }
-            }
-
-            GeneratedCharset = new string(charSet.OrderBy(c => c).ToArray());
-            HasGeneratedCharset = true;
-        }
-
-        /// <summary>
-        /// Clears the generated charset after its language selection changes.
-        /// </summary>
-        public void ClearGeneratedCharset()
-        {
-            GeneratedCharset = "";
-            HasGeneratedCharset = false;
-        }
-
-        private static void AddValueToCharset(object value, HashSet<char> charSet)
-        {
-            switch (value)
-            {
-                case string str:
-                    foreach (var c in str)
-                        charSet.Add(c);
-                    break;
-                case List<string> list:
-                    foreach (var c in list.Where(item => item != null).SelectMany(item => item))
-                        charSet.Add(c);
-                    break;
             }
         }
     }

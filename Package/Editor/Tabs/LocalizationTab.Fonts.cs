@@ -10,6 +10,7 @@ using UnityEngine.TextCore.LowLevel;
 using TMPro;
 using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
+using PicoShot.Localization.Editor.Services;
 using PicoShot.Localization.Rtl;
 using Object = UnityEngine.Object;
 using Styles = PicoShot.Localization.Editor.LocalizationEditorStyles;
@@ -512,7 +513,7 @@ namespace PicoShot.Localization.Editor.Tabs
 
         private static string ToCharacterString(IEnumerable<int> codepoints, string separator = "")
         {
-            return string.Join(separator, codepoints.Select(char.ConvertFromUtf32));
+            return CharacterSetCollector.ToText(codepoints, separator);
         }
 
         /// <summary>
@@ -533,7 +534,7 @@ namespace PicoShot.Localization.Editor.Tabs
                 return cached;
 
             var coverage = new FontCoverage { DataVersion = Data.DataVersion, TmpFont = tmpFont, LegacyFont = legacyFont };
-            var used = CollectUsedCharacters(code);
+            var used = CharacterSetCollector.CollectLanguage(Data, code);
             coverage.UsedCharacters = used.OrderBy(c => c).ToList();
 
             if (tmpFont != null)
@@ -552,78 +553,6 @@ namespace PicoShot.Localization.Editor.Tabs
 
             _coverageCache[code] = coverage;
             return coverage;
-        }
-
-        /// <summary>
-        /// Every renderable character in a language's translations, after rich-text tags are
-        /// stripped and RTL text is shaped (so Arabic is checked in its presentation forms).
-        /// </summary>
-        private HashSet<int> CollectUsedCharacters(string code)
-        {
-            var result = new HashSet<int>();
-            bool rtl = LanguageDefinitions.IsRightToLeft(code);
-
-            foreach (var key in Data.Keys)
-            {
-                if (!Data.LanguageData.TryGetValue(key, out var keyData) || !keyData.TryGetValue(code, out var value))
-                    continue;
-
-                switch (value)
-                {
-                    case string str:
-                        CollectCharacters(str, rtl, result);
-                        break;
-                    case IList<string> list:
-                        foreach (var item in list)
-                            CollectCharacters(item, rtl, result);
-                        break;
-                }
-            }
-
-            return result;
-        }
-
-        private static void CollectCharacters(string text, bool rtl, HashSet<int> into)
-        {
-            if (string.IsNullOrEmpty(text))
-                return;
-
-            text = RichTextTag.Replace(text, string.Empty);
-            if (rtl)
-                text = RtlTextHandler.Fix(text);
-
-            for (int i = 0; i < text.Length; i++)
-            {
-                int codepoint;
-                if (char.IsHighSurrogate(text[i]) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
-                {
-                    codepoint = char.ConvertToUtf32(text[i], text[i + 1]);
-                    i++;
-                }
-                else if (char.IsSurrogate(text[i]))
-                {
-                    continue;
-                }
-                else
-                {
-                    codepoint = text[i];
-                }
-
-                if (!IsIgnorableCharacter(codepoint))
-                    into.Add(codepoint);
-            }
-        }
-
-        private static bool IsIgnorableCharacter(int codepoint)
-        {
-            if (codepoint <= char.MaxValue && (char.IsWhiteSpace((char)codepoint) || char.IsControl((char)codepoint)))
-                return true;
-
-            return codepoint is >= 0x200B and <= 0x200F  // zero-width spaces and direction marks
-                or >= 0x202A and <= 0x202E                // bidi embedding controls
-                or >= 0x2060 and <= 0x206F                // invisible operators
-                or >= 0xFE00 and <= 0xFE0F                // variation selectors
-                or 0xFEFF;
         }
 
         /// <summary>
