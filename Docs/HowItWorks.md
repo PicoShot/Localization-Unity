@@ -57,17 +57,18 @@ The system automatically initializes when your game starts, before the first sce
 Initialize()
     └─► ScanAvailableLanguages()
         └─► Scan Locales/ folder for .bloc files
+        └─► Read each file header only (language code); content is checked when loaded
         └─► Verify hashes (if anti-tamper enabled)
         └─► Filter by selected languages (if protection enabled)
-        └─► Extract all translation keys from default language
+        └─► Load the default language once (kept as fallback for every language)
 ```
 
 ### 3. Default Language Loading
 
 ```
 SetLanguage(DetectSystemLanguage())
-    └─► Load current language data
-    └─► Load fallback language data
+    └─► Load current language data (reuses the default language if it is the target)
+    └─► Use the already-loaded default language as fallback
     └─► Fire OnLanguageChanged event
 ```
 
@@ -274,8 +275,8 @@ component.AddTextProcessor(text => $"[ {text} ]");
 ### Anti-Tamper Mode
 
 ```
-Build Time:
-    └─► LocalesBuildProcessor runs
+Editor (automatic while anti-tamper is enabled):
+    └─► After saving, MCP edits, file upgrades and before every build
     └─► Calculate SHA256 hash of each .bloc file
     └─► Store hashes in LocalizationConfig
 
@@ -285,6 +286,8 @@ Runtime:
         └─► Calculate actual hash
         └─► Compare with stored hash
         └─► Mismatch? Log error & skip file
+    └─► When a language is loaded, the hash is checked again on the exact bytes parsed
+    └─► The fallback (default) language goes through the same checks
 ```
 
 ### Selection-Only Mode
@@ -361,11 +364,11 @@ Called automatically on `Application.quitting`.
 ### Build Processor
 
 ```csharp
-public class LocalesBuildProcessor : IPreprocessBuildWithReport, IPostprocessBuildWithReport
+public class LocalesBuildProcessor : BuildPlayerProcessor, IPostprocessBuildWithReport
 ```
 
-- **Preprocess**: Validate files, check hashes
-- **Postprocess**: Copy locales to build output
+- **Prepare**: Refresh anti-tamper hashes; for StreamingAssets platforms (including macOS), add the `.bloc` files to StreamingAssets without copying them into `Assets/`
+- **Postprocess**: Windows and Linux players get a `Locales` folder next to the executable
 
 ---
 

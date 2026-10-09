@@ -177,6 +177,8 @@ Yes! Enable protection in the config:
 2. Build your project
 3. Hash verification will check file integrity at runtime
 
+Hashes are refreshed automatically when you save, when the MCP server edits files, and before every build, so you do not need to press "Sync File Hashes" after editing translations.
+
 ### Can I add custom languages?
 
 The system supports any ISO language code. Add custom languages by:

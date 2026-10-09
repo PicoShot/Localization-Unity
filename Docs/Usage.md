@@ -308,6 +308,11 @@ LocalizationManager.BindText(myTextComponent, "stats", args: new object[] { 100,
 // With array index (for array-type translations)
 LocalizationManager.BindText(myTextComponent, "difficulty_options", arrayIndex: 2);
 
+// Key arguments are translated, and re-translated when the language changes
+LocalizationManager.BindText(myTextComponent, "found_item", args: Key.FromKey("items.sword"));
+
+// Calling BindText again replaces the previous binding (including its text processor)
+
 // With text processor
 LocalizationManager.BindText(myTextComponent, "greeting", textProcessor: text => text.ToUpper());
 
