@@ -418,8 +418,8 @@ namespace PicoShot.Localization
                 _currentLanguageCode = targetLanguage;
 
                 _arrayCache.Clear();
-                OnLanguageChanged?.Invoke();
                 TriggerFontChanged();
+                OnLanguageChanged?.Invoke();
             }
             catch (Exception ex)
             {

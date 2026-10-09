@@ -142,6 +142,7 @@ namespace PicoShot.Localization
         private string _lastText;
         private string _originalLogicalText;
         private bool _isFixingTMP;
+        private string _wrappedLanguage;
         private Vector2 _lastWrappedRectSize = new(float.NaN, float.NaN);
         private bool _isInitialized;
         private readonly List<Func<string, string>> _textProcessors = new();
@@ -163,14 +164,14 @@ namespace PicoShot.Localization
             base.OnEnable();
             LocalizationManager.OnLanguageChanged += UpdateText;
             LocalizationManager.OnFontChanged += UpdateFont;
+
+            LocalizationManager.GetCurrentFonts(out var tmpFont, out var legacyFont);
+            UpdateFont(tmpFont, legacyFont);
+
             if (_isInitialized && Application.isPlaying)
             {
                 UpdateText();
             }
-
-            // Apply the current font immediately in case the font-changed event was fired before this component subscribed.
-            LocalizationManager.GetCurrentFonts(out var tmpFont, out var legacyFont);
-            UpdateFont(tmpFont, legacyFont);
         }
 
         protected override void OnDisable()
@@ -272,9 +273,14 @@ namespace PicoShot.Localization
                 Initialize();
             }
 
+            bool tmpFontChanged = false;
             if (tmpFont != null)
             {
-                if (_tmpText != null) _tmpText.font = tmpFont;
+                if (_tmpText != null && _tmpText.font != tmpFont)
+                {
+                    _tmpText.font = tmpFont;
+                    tmpFontChanged = true;
+                }
                 if (_tmpDropdown != null)
                 {
                     if (_tmpDropdown.captionText != null) _tmpDropdown.captionText.font = tmpFont;
@@ -293,8 +299,11 @@ namespace PicoShot.Localization
                 if (_textMesh != null) _textMesh.font = legacyFont;
             }
 
-            if (_tmpText != null && LocalizationManager.IsRightToLeft && _originalLogicalText != null)
+            if (tmpFontChanged && _tmpText != null && LocalizationManager.IsRightToLeft && _originalLogicalText != null &&
+                _wrappedLanguage == LocalizationManager.CurrentLanguage)
+            {
                 ApplyTMPRtlWrap(_originalLogicalText, force: true);
+            }
         }
 
         /// <summary>
@@ -402,6 +411,7 @@ namespace PicoShot.Localization
         public void ForceRefresh()
         {
             _lastText = null;
+            _originalLogicalText = null;
             Initialize();
             UpdateText();
         }
@@ -415,9 +425,11 @@ namespace PicoShot.Localization
             if (_tmpText != null && LocalizationManager.IsRightToLeft)
             {
                 string logicalText = ApplyProcessors(GetLogicalTranslatedText());
-                ApplyTMPRtlWrap(logicalText, force: true);
+                ApplyTMPRtlWrap(logicalText, force: false);
                 return;
             }
+
+            _originalLogicalText = null;
 
             string text = GetTranslatedText();
             text = ApplyProcessors(text);
@@ -450,7 +462,7 @@ namespace PicoShot.Localization
             Vector2 rectSize = rectTransform != null
                 ? rectTransform.rect.size
                 : new Vector2(float.PositiveInfinity, float.PositiveInfinity);
-            if (!force && logicalText == _originalLogicalText)
+            if (!force && logicalText == _originalLogicalText && _wrappedLanguage == LocalizationManager.CurrentLanguage)
             {
                 bool widthUnchanged = Mathf.Approximately(rectSize.x, _lastWrappedRectSize.x);
                 bool relevantHeightUnchanged = !_tmpText.enableAutoSizing ||
@@ -460,6 +472,7 @@ namespace PicoShot.Localization
 
             _originalLogicalText = logicalText ?? string.Empty;
             _lastWrappedRectSize = rectSize;
+            _wrappedLanguage = LocalizationManager.CurrentLanguage;
             _tmpText.isRightToLeftText = false;
 
             if (_originalLogicalText.Length == 0)
