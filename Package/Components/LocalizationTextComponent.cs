@@ -503,7 +503,7 @@ namespace PicoShot.Localization
                 int lineCount = textInfo?.lineCount ?? 0;
                 if (lineCount <= 0)
                 {
-                    finalText = string.Empty;
+                    finalText = GetSafeRtlFallback(_originalLogicalText);
                 }
                 else
                 {
