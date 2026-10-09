@@ -105,28 +105,32 @@ Use `Tools > Localization > MCP Server > Copy Agent Config` for a paste-ready sn
 
 ## Tools
 
-| Tool               | Description                                                                        |
-| ------------------ | ---------------------------------------------------------------------------------- |
-| `list_languages`   | All language codes + project default.                                              |
-| `list_keys`        | Keys with `search`, `view`, `limit`, `offset` pagination.                          |
-| `get_key`          | Translations for one key, optional `langs` filter. Prefer `get_language` for bulk. |
-| `get_language`     | Whole language at once (`key` → text or array). One call per dump.                 |
-| `set_translation`  | Set one key in one language (string or string array).                              |
-| `set_translations` | Set up to 500 translations in one call (`[{key, lang, value}]`, per-item results). |
-| `add_key`          | New key across all languages (`type`, `defaultText`, `defaultLang`).               |
-| `rename_key`       | Rename a key, preserving translations.                                             |
-| `delete_key`       | Delete a key everywhere.                                                           |
-| `add_language`     | Add a language (empty cells, array shapes mirrored).                               |
-| `remove_language`  | Remove a language and its file.                                                    |
-| `validate`         | Report corrupt files, coverage gaps and empty cells.                               |
+| Tool               | Description                                                                                                  |
+| ------------------ | ------------------------------------------------------------------------------------------------------------ |
+| `list_languages`   | Overview: languages (name, RTL, key/empty counts), project default, total keys, unreadable files.           |
+| `list_keys`        | Key names with `search`, `view`, `limit`, `offset` pagination.                                               |
+| `get_key`          | One key, optional `langs` filter.                                                                            |
+| `get_keys`         | Up to 500 keys at once (`key` → `{lang: value}`), unknown keys with suggestions.                             |
+| `get_language`     | One language, filtered by `view` / `search` / `keys` / `emptyOnly`, paginated.                               |
+| `get_untranslated` | Translation work list for one language: `key` → source text, for missing or empty cells.                    |
+| `set_translation`  | Set one cell.                                                                                                |
+| `set_translations` | Set up to 500 cells: `{lang, values: {key: value}}` and/or `[{key, lang, value}]`. Returns only failures.    |
+| `add_key`          | New key across all languages (`type`, `defaultText`, `defaultLang`).                                         |
+| `add_keys`         | Up to 500 new keys at once, optionally with values per language.                                             |
+| `rename_key`       | Rename a key, preserving translations.                                                                       |
+| `delete_key(s)`    | Delete one key / up to 500 keys everywhere.                                                                  |
+| `add_language`     | Add a language (empty cells, array lengths mirrored).                                                        |
+| `remove_language`  | Remove a language and its file (refuses the default and the last language).                                  |
+| `validate`         | Unreadable files, missing keys, string/array conflicts, array length mismatches, empty counts per language. |
 
 Resources: every language is also readable as `locales://{lang}` (JSON).
 
-Key rules are the same as in the editor: keys are unique case-insensitively, array keys keep equal length across languages, filenames must match the language code in the file header.
+Tools carry MCP annotations (`readOnlyHint`, `destructiveHint`, …) so clients can auto-approve reads and confirm destructive calls. Unknown arguments are rejected with the list of expected ones.
+
 
 ## Agent skill
 
-The repo ships a skill file (`.agents/skills/picoshot-localization/SKILL.md`) that teaches agents these tools and the efficient flows above (bulk reads/writes, gap-driven translation, parallel safety). To install it to your project, run:
+The repo ships a skill file (`.agents/skills/picoshot-localization/SKILL.md`) that teaches agents these tools, the efficient flows (`get_untranslated` → `set_translations`, `add_keys` with values), translation-quality rules (keep placeholders and rich-text tags) and safe rename/delete practice. To install it to your project, run:
 
 ```bash
 npx skills add PicoShot/Localization-Unity

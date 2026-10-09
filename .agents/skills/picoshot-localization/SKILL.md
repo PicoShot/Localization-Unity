@@ -1,53 +1,77 @@
 ---
 name: picoshot-localization
-description: Read, add, rename, delete, or translate game localization keys through the PicoShot Localization Unity package MCP tools, preferring bulk reads and writes over per-key loops.
+description: Translate, add, rename, delete or audit Unity game localization keys and languages (locale / translation / .bloc files) through the PicoShot Localization MCP tools, using batch reads and writes instead of per-key loops.
 ---
 
 # PicoShot Localization (Unity) — MCP tools
 
-These MCP tools come from the **PicoShot Localization Unity package** (`com.picoshot.localization`). The MCP server runs inside the Unity Editor (loopback HTTP) and edits the same `Locales/*.bloc` files as the Language Editor. You translate with your own judgment; there is no machine-translation tool — you are the translator.
+These tools come from the **PicoShot Localization Unity package** (`com.picoshot.localization`). The server runs inside the Unity Editor (loopback HTTP) and edits the same `Locales/*.bloc` files as the Language Editor. There is no machine-translation tool: you are the translator.
 
-Prerequisites: Unity must be open and the server started (Language Editor > Settings > MCP > Start Server, or Tools > Localization > MCP Server). If tools fail with connection errors, tell the user to start it instead of working around it.
+Prerequisite: Unity must be open with the server started (Language Editor > Settings > MCP > Start Server, or Tools > Localization > MCP Server). If calls fail with connection errors, ask the user to start it; don't work around it.
 
-## Golden rules (efficiency)
+## Golden rules
 
-1. **Bulk reads, never per-key loops.** `get_language` dumps a whole language in one call. `get_key` accepts a `langs` filter for one key in specific languages. Looping `get_key` over hundreds of keys is slow and burns context — don't do it.
-2. **Bulk writes.** `set_translations` writes up to 500 `{key, lang, value}` cells per call and reports per-item results. Always check `failed`; each failure names its reason.
-3. **Create before you fill.** `add_key` creates a key in every language at once (with `defaultText` in the default language). Then fill translations with `set_translations`.
-4. **Find gaps with `validate`.** Its `emptyCells` list (`lang:key`) is the exact work list. Re-run it at the end to confirm zero gaps.
-5. **Parallel calls are safe.** Fire independent calls (e.g. several `add_key`) in one block — no delays needed. The server serializes file access; you will not corrupt or lose keys.
-6. **Trust error hints.** "Unknown key" replies include did-you-mean candidates; unknown languages list the available codes. Follow the hint instead of re-reading the whole index.
-7. **Values are strings or string arrays.** Array keys must keep equal length across languages. Keys are unique case-insensitively.
+1. **Start with `list_languages`.** One call gives every language (name, RTL, key and empty counts), the default language, total keys, and any locale files that failed to load.
+2. **Batch everything.** Use `get_untranslated` / `get_keys` / `get_language` to read, `set_translations` to write (≤500 cells), `add_keys` to create (≤500 keys, values included), and `delete_keys` to delete. Don't loop single-key tools.
+3. **Read `errors` in batch results.** Batch tools apply the valid items and return only the failures, by `index` with a reason. Fix those items and resend only them.
+4. **Follow error hints.** Unknown keys come with "did you mean" suggestions, and unknown languages list the codes that exist. Don't re-list everything.
+5. **Page large results.** When a response has `nextOffset`, pass it as `offset` to get the next page.
+
+## Translation quality (you are the translator)
+
+- Keep these exactly as in the source: placeholders (`{0}`, `{1:N2}`, `{name}`), rich-text and TextMeshPro tags (`<b>`, `<color=#fff>`, `<sprite=3>`, `<br>`), `\n`, and leading or trailing spaces.
+- Never translate key names. For array keys, keep the same number of elements in the same order.
+- Match the game's existing tone and terms. Read a few existing translations of the target language (`get_language` with `view`) before starting a large batch.
+- UI strings have limited space. Prefer short wording close to the source length.
+- For RTL languages (`rtl: true`, e.g. `ar`, `he`, `fa`), write normal logical-order text; the package handles shaping.
 
 ## Tools
 
-- `list_languages` — language codes + project default. Start here.
-- `list_keys` — keys with `search`, `view`, `limit`, `offset`. Paginate large sets.
-- `get_key` — one key; optional `langs` filter (e.g. `["en", "de"]`).
-- `get_language` — one whole language (`key` → text or array) plus `count`. The bulk-read tool.
-- `set_translation` — one cell. Prefer the batch form below.
-- `set_translations` — up to 500 cells per call. The bulk-write tool.
-- `add_key` — new key everywhere (`type`: `string`|`array`, `defaultText`, `defaultLang`).
-- `rename_key` / `delete_key` — rename preserves translations; delete is permanent.
-- `add_language` / `remove_language` — new languages start empty (array shapes mirrored).
-- `validate` — coverage gaps, empty cells, file problems.
+Read (safe):
+- `list_languages`: overview, call first.
+- `list_keys`: key names with `search`, `view` prefix, paging.
+- `get_key`: one key, optional `langs`.
+- `get_keys`: up to 500 keys, as key → {lang: value}.
+- `get_language`: one language, filtered by `view`/`search`/`keys`/`emptyOnly`, paged.
+- `get_untranslated`: the translation work list, as key → source text.
+- `validate`: unreadable files, missing keys, type and array-length conflicts, empty counts. Add `lang` to list that language's empty keys.
+
+Write:
+- `set_translations`: `{lang, values: {key: value}}` and/or `translations: [{key, lang, value}]`, ≤500 cells. Cells that already hold the value are skipped.
+- `set_translation`: one cell.
+- `add_keys`: `[{key, type?, values?: {lang: value}}]`. Creates each key in every language.
+- `add_key`: one key (`defaultText`, `defaultLang`).
+- `add_language`: a code such as `de`, `pt-br` or `zh-hans`. Existing keys are created empty.
+
+Destructive (confirm with the user first):
+- `rename_key`, `delete_key`, `delete_keys`, `remove_language`.
 
 ## Canonical flows
 
-**Dump one language as JSON:** `get_language({lang})` — one call, done.
+**Translate a language:**
+1. `get_untranslated({lang: "de"})` returns `items` as {key: source text}. If `current` is present, it holds partially translated arrays.
+2. Translate the values, then call `set_translations({lang: "de", values: {...same keys...}})`.
+3. If the result had `nextOffset`, repeat until it is gone. Then `validate` should show `emptyByLanguage.de` at 0, apart from keys counted in `noSource`, whose source text is empty too.
 
-**Add N new keys and translate to all languages:**
-1. `list_languages` for the target set.
-2. One `add_key` per key (parallel-safe) with English `defaultText`.
-3. Translate, then write everything with `set_translations` (≤500 cells/call).
-4. `validate` — `emptyCells` must be empty.
+**Translate into every language:** run the flow above once per language from `list_languages`. Independent languages can run in parallel.
 
-**Translate all missing cells:** `validate` → work through `emptyCells` with `set_translations` → `validate` again.
+**Add new keys with all translations:** write the source text and the translations yourself, then create everything in one `add_keys` call: `[{key: "ui.quit", values: {en: "Quit", de: "Beenden", fr: "Quitter"}}]`. No separate fill step is needed.
 
-**Check a hunch about one key:** `get_key`, with `langs` when only some languages matter.
+**Review some keys:** `get_keys({keys: [...]})`, or `get_language({lang, view: "ui"})` for one area.
+
+**Rename or delete keys:** components and scripts reference keys by string, and these tools do not update them. First search the project's `Assets` (`*.cs`, `*.unity`, `*.prefab`, `*.asset`) for the exact key. Show the user what references it, get confirmation, rename or delete, then update the references.
+
+## Rules the server enforces
+
+- Key names use letters, digits, `_` and `.` (e.g. `ui.play_button`) and are unique case-insensitively. Use the project's existing prefixes: check `list_keys` with a `view` before inventing new ones.
+- Each key is a `string` or an `array` key in every language. Sending the wrong type is rejected.
+- An array key has the same length in every language. To resize one, send the new array for **all** languages in the same `set_translations` call.
+- Language codes are normalized, so `DE` and `pt_BR` become `de` and `pt-br`.
+- `add_language` refuses to overwrite a locale file that exists but failed to load. Report the `fileIssues` entry to the user instead.
+- `remove_language` refuses the project default language and the last remaining language.
 
 ## Limits
 
-- `set_translations` rejects batches over 500 items — split them.
-- `remove_language` refuses to delete the last language; `delete_key` cannot be undone.
-- The server is Editor-only and loopback-only; it cannot run without Unity open.
+- 500 items per batch call (`set_translations`, `add_keys`, `delete_keys`, `get_keys`).
+- Editor-only and loopback-only: nothing works without Unity open.
+- The runtime loads locales at startup, so changes show in Play mode only after it is re-entered.
