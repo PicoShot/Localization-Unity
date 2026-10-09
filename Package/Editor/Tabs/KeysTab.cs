@@ -180,6 +180,21 @@ namespace PicoShot.Localization.Editor.Tabs
 
             EditorGUILayout.EndHorizontal();
 
+            if (!string.IsNullOrEmpty(Data.UntranslatedLanguageFilter))
+            {
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField(" ", GUILayout.Width(80));
+                string languageName = LanguageDefinitions.GetDisplayName(Data.UntranslatedLanguageFilter);
+                GUILayout.Label($"Untranslated in {languageName}", LocalizationEditorStyles.Badge);
+                if (GUILayout.Button(new GUIContent("Clear", "Show all keys again"), EditorStyles.miniButton, GUILayout.Width(50)))
+                {
+                    Data.UntranslatedLanguageFilter = null;
+                    GUI.FocusControl(null);
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+            }
+
             var totalKeys = Data.Keys.Count;
             var filteredCount = Data.GetFilteredKeys().Count;
             EditorGUILayout.BeginHorizontal();

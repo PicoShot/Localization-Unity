@@ -48,6 +48,11 @@ namespace PicoShot.Localization.Editor.Data
         public bool ShowStringKeysOnly { get; set; }
         public bool SortKeysByName { get; set; }
 
+        /// <summary>
+        /// When set, the keys list only shows keys that are not yet translated in this language.
+        /// </summary>
+        public string UntranslatedLanguageFilter { get; set; }
+
         // Foldouts
         public bool ShowStatusSection { get; set; } = true;
         public bool ShowTestingTools { get; set; } = true;
@@ -85,6 +90,16 @@ namespace PicoShot.Localization.Editor.Data
         public Dictionary<string, bool> LanguageSelectionForCharset { get; } = new();
         public string GeneratedCharset { get; private set; } = "";
         public bool HasGeneratedCharset { get; private set; }
+
+        /// <summary>
+        /// Languages removed in the editor whose locale files are deleted on the next save.
+        /// </summary>
+        public HashSet<string> PendingRemovedLanguages { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Incremented whenever keys or translations change; use it to invalidate cached derived data.
+        /// </summary>
+        public int DataVersion => _dataVersion;
 
         // Translation Provider Settings
         public const string TranslationProviderPref = "PicoShot_Localization_TranslationProvider";
@@ -195,6 +210,7 @@ namespace PicoShot.Localization.Editor.Data
         private bool _filteredArraysOnly;
         private bool _filteredStringsOnly;
         private bool _filteredSorted;
+        private string _filteredUntranslated;
         private readonly List<string> _filteredKeys = new();
 
         private int _viewsVersion = -1;
@@ -224,7 +240,8 @@ namespace PicoShot.Localization.Editor.Data
                 _filteredDelimiter == delimiter &&
                 _filteredArraysOnly == ShowArrayKeysOnly &&
                 _filteredStringsOnly == ShowStringKeysOnly &&
-                _filteredSorted == SortKeysByName)
+                _filteredSorted == SortKeysByName &&
+                _filteredUntranslated == UntranslatedLanguageFilter)
             {
                 return _filteredKeys;
             }
@@ -246,6 +263,9 @@ namespace PicoShot.Localization.Editor.Data
                 if (!ShowArrayKeysOnly && ShowStringKeysOnly && IsArrayKey(LanguageData[key]))
                     continue;
 
+                if (!string.IsNullOrEmpty(UntranslatedLanguageFilter) && IsTranslated(key, UntranslatedLanguageFilter))
+                    continue;
+
                 _filteredKeys.Add(key);
             }
 
@@ -260,6 +280,7 @@ namespace PicoShot.Localization.Editor.Data
             _filteredArraysOnly = ShowArrayKeysOnly;
             _filteredStringsOnly = ShowStringKeysOnly;
             _filteredSorted = SortKeysByName;
+            _filteredUntranslated = UntranslatedLanguageFilter;
             return _filteredKeys;
         }
 
@@ -311,6 +332,47 @@ namespace PicoShot.Localization.Editor.Data
                 return false;
             var firstValue = keyData.Values.FirstOrDefault();
             return firstValue is List<string> || firstValue is string[];
+        }
+
+        /// <summary>
+        /// Whether a key has a non-empty value in the given language.
+        /// Array keys count as translated only when every element is filled.
+        /// </summary>
+        public bool IsTranslated(string key, string language)
+        {
+            if (!LanguageData.TryGetValue(key, out var keyData) || !keyData.TryGetValue(language, out var value))
+                return false;
+
+            switch (value)
+            {
+                case string str:
+                    return !string.IsNullOrWhiteSpace(str);
+                case IList<string> list:
+                    if (list.Count == 0)
+                        return false;
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        if (string.IsNullOrWhiteSpace(list[i]))
+                            return false;
+                    }
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// Counts the keys that are translated in the given language.
+        /// </summary>
+        public int CountTranslated(string language)
+        {
+            int count = 0;
+            foreach (var key in Keys)
+            {
+                if (IsTranslated(key, language))
+                    count++;
+            }
+            return count;
         }
 
         /// <summary>
@@ -367,6 +429,8 @@ namespace PicoShot.Localization.Editor.Data
             KeyFoldouts.Clear();
             LanguageCodes.Clear();
             LanguageCodes.Add(LocalizationConfigProvider.Config.DefaultLanguage);
+            PendingRemovedLanguages.Clear();
+            UntranslatedLanguageFilter = null;
             GeneratedCharset = "";
             HasGeneratedCharset = false;
         }
@@ -380,6 +444,7 @@ namespace PicoShot.Localization.Editor.Data
                 return false;
 
             LanguageCodes.Add(language);
+            PendingRemovedLanguages.Remove(language);
 
             foreach (var key in Keys)
             {
@@ -417,10 +482,52 @@ namespace PicoShot.Localization.Editor.Data
                 return false;
 
             LanguageCodes.Remove(language);
+            PendingRemovedLanguages.Add(language);
 
             foreach (var key in Keys.Where(key => LanguageData[key].ContainsKey(language)))
             {
                 LanguageData[key].Remove(language);
+            }
+
+            if (string.Equals(UntranslatedLanguageFilter, language, StringComparison.OrdinalIgnoreCase))
+                UntranslatedLanguageFilter = null;
+
+            HasUnsavedChanges = true;
+            return true;
+        }
+
+        /// <summary>
+        /// Copies every value of a language so a removal can be undone.
+        /// </summary>
+        public Dictionary<string, object> CaptureLanguage(string language)
+        {
+            var snapshot = new Dictionary<string, object>();
+            foreach (var key in Keys)
+            {
+                if (LanguageData[key].TryGetValue(language, out var value))
+                    snapshot[key] = value is List<string> list ? new List<string>(list) : value;
+            }
+            return snapshot;
+        }
+
+        /// <summary>
+        /// Re-adds a removed language with the values captured by <see cref="CaptureLanguage"/>.
+        /// Keys created after the capture get empty values.
+        /// </summary>
+        public bool RestoreLanguage(string language, int index, Dictionary<string, object> snapshot)
+        {
+            if (LanguageCodes.Contains(language))
+                return false;
+
+            LanguageCodes.Insert(Mathf.Clamp(index, 0, LanguageCodes.Count), language);
+            PendingRemovedLanguages.Remove(language);
+
+            foreach (var key in Keys)
+            {
+                if (snapshot != null && snapshot.TryGetValue(key, out var value))
+                    LanguageData[key][language] = value;
+                else
+                    AddLanguageToKey(key, language);
             }
 
             HasUnsavedChanges = true;

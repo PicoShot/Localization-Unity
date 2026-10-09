@@ -208,6 +208,15 @@ namespace PicoShot.Localization
             Repaint();
         }
 
+        /// <summary>
+        /// Opens the Keys tab filtered to keys that are untranslated in the given language.
+        /// </summary>
+        public void ShowUntranslatedKeys(string languageCode)
+        {
+            _data.UntranslatedLanguageFilter = languageCode;
+            SwitchToTab(EditorTab.Keys);
+        }
+
         private static string GetTabDisplayName(EditorTab tab)
         {
             return tab switch
@@ -517,6 +526,17 @@ namespace PicoShot.Localization
                     string filePath = LocalizationManager.GetLanguageFilePath(lang);
                     LocaleBlocSerializer.SaveFile(filePath, localeData);
                 }
+
+                foreach (var lang in _data.PendingRemovedLanguages)
+                {
+                    if (_data.LanguageCodes.Contains(lang))
+                        continue;
+
+                    string filePath = LocalizationManager.GetLanguageFilePath(lang);
+                    if (File.Exists(filePath))
+                        File.Delete(filePath);
+                }
+                _data.PendingRemovedLanguages.Clear();
 
                 var config = LocalizationConfigProvider.Config;
                 config.SetSelectedLanguages(new List<string>(_data.LanguageCodes));
