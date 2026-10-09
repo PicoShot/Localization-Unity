@@ -225,6 +225,29 @@ namespace PicoShot.Localization
             SwitchToTab(EditorTab.Keys);
         }
 
+        /// <summary>
+        /// Opens the Keys tab with the given key selected, clearing filters that would hide it.
+        /// </summary>
+        public void ShowKey(string key)
+        {
+            if (string.IsNullOrEmpty(key) || !_data.LanguageData.ContainsKey(key))
+                return;
+
+            _data.SelectedKey = key;
+            if (!_data.GetFilteredKeys().Contains(key))
+            {
+                _data.KeySearchFilter = "";
+                _data.ShowArrayKeysOnly = false;
+                _data.ShowStringKeysOnly = false;
+                _data.StatusFilter = KeyStatusFilter.All;
+                _data.UntranslatedLanguageFilter = null;
+                if (!_data.GetFilteredKeys().Contains(key))
+                    _data.SelectedView = "";
+            }
+
+            SwitchToTab(EditorTab.Keys);
+        }
+
         private static string GetTabDisplayName(EditorTab tab)
         {
             return tab switch

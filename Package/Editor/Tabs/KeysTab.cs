@@ -53,6 +53,11 @@ namespace PicoShot.Localization.Editor.Tabs
 
         public override string TabName => "Keys";
 
+        public override void OnEnter()
+        {
+            AutoScrollToSelectedKey();
+        }
+
         private static string DefaultLanguage => LocalizationConfigProvider.Config.DefaultLanguage;
         private static string ActionKeyName => Application.platform == RuntimePlatform.OSXEditor ? "Cmd" : "Ctrl";
 

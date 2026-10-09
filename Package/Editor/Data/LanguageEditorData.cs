@@ -67,7 +67,6 @@ namespace PicoShot.Localization.Editor.Data
         // Search & Filters
         public string KeySearchFilter { get; set; } = "";
         public string LanguageFilter { get; set; } = "";
-        public string ComponentSearchFilter { get; set; } = "";
         public bool ShowArrayKeysOnly { get; set; }
         public bool ShowStringKeysOnly { get; set; }
         public bool SortKeysByName { get; set; }
@@ -88,17 +87,13 @@ namespace PicoShot.Localization.Editor.Data
         public bool ShowStatusSection { get; set; } = true;
         public bool ShowTestingTools { get; set; } = true;
         public bool ShowParameterList { get; set; }
-        public bool ShowExistingComponents { get; set; } = true;
 
         // UI State
         public float KeysListPanelWidth { get; set; } = 200f;
         public Vector2 KeysListScroll { get; set; }
         public Vector2 KeyDetailsScroll { get; set; }
         public Vector2 LanguageScrollPos { get; set; }
-        public Vector2 ComponentsScrollPos { get; set; }
-        public Vector2 ExistingComponentsScrollPos { get; set; }
         public Vector2 MainScrollPosition { get; set; }
-        public Vector2 ComponentsScrollPosition { get; set; }
         public Vector2 ToolsScrollPosition { get; set; }
         public Vector2 CharsetLanguageScrollPos { get; set; }
 
@@ -111,7 +106,6 @@ namespace PicoShot.Localization.Editor.Data
 
         // Component Management
         public GameObject SelectedGameObject { get; set; }
-        public LocalizationTextComponent PendingKeySelection { get; set; }
 
         // Core Data
         public List<string> LanguageCodes { get; } = new() { "en" };
