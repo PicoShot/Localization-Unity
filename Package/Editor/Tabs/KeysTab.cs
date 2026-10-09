@@ -802,9 +802,11 @@ namespace PicoShot.Localization.Editor.Tabs
         {
             if (_transparentTexture == null)
             {
-                _transparentTexture = new Texture2D(1, 1);
+                _transparentTexture = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
                 _transparentTexture.SetPixel(0, 0, new Color(0, 0, 0, 0));
                 _transparentTexture.Apply();
+                _keyButtonStyleNormal = null;
+                _keyButtonStyleSelected = null;
             }
 
             if (_keyButtonStyleNormal == null)
