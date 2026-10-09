@@ -33,6 +33,11 @@ namespace PicoShot.Localization.Editor
         private static GUIStyle _sectionTitle;
         private static GUIStyle _emptyState;
         private static GUIStyle _inheritedField;
+        private static GUIStyle _rowLabelMuted;
+        private static GUIStyle _textArea;
+        private static GUIStyle _placeholder;
+        private static GUIStyle _warningLabel;
+        private static GUIStyle _centeredTitle;
         private static Texture2D _badgeTexture;
         private static bool _badgeTextureDark;
 
@@ -90,6 +95,77 @@ namespace PicoShot.Localization.Editor
                 _emptyState.normal.textColor = MutedText;
                 return _emptyState;
             }
+        }
+
+        public static GUIStyle RowLabelMuted
+        {
+            get
+            {
+                _rowLabelMuted ??= new GUIStyle(RowLabel) { padding = new RectOffset(0, 0, 0, 0) };
+                _rowLabelMuted.normal.textColor = MutedText;
+                return _rowLabelMuted;
+            }
+        }
+
+        /// <summary>
+        /// Word-wrapped text area that grows with its content.
+        /// </summary>
+        public static GUIStyle TextArea => _textArea ??= new GUIStyle(EditorStyles.textArea)
+        {
+            wordWrap = true,
+            richText = false
+        };
+
+        /// <summary>
+        /// Muted italic hint drawn inside empty text fields.
+        /// </summary>
+        public static GUIStyle Placeholder
+        {
+            get
+            {
+                _placeholder ??= new GUIStyle(EditorStyles.label)
+                {
+                    fontStyle = FontStyle.Italic,
+                    padding = EditorStyles.textArea.padding,
+                    alignment = TextAnchor.UpperLeft,
+                    clipping = TextClipping.Clip
+                };
+                _placeholder.normal.textColor = MutedText;
+                return _placeholder;
+            }
+        }
+
+        public static GUIStyle WarningLabel
+        {
+            get
+            {
+                _warningLabel ??= new GUIStyle(EditorStyles.miniLabel)
+                {
+                    alignment = TextAnchor.MiddleLeft,
+                    clipping = TextClipping.Clip
+                };
+                _warningLabel.normal.textColor = Warning;
+                return _warningLabel;
+            }
+        }
+
+        public static GUIStyle CenteredTitle => _centeredTitle ??= new GUIStyle(SectionTitle)
+        {
+            alignment = TextAnchor.MiddleCenter
+        };
+
+        /// <summary>
+        /// Built-in editor icon (skin-aware) with a text fallback when the icon doesn't exist in this Unity version.
+        /// </summary>
+        public static GUIContent Icon(string name, string fallbackText, string tooltip)
+        {
+            Texture2D texture = null;
+            if (IsDark)
+                texture = EditorGUIUtility.FindTexture("d_" + name);
+            if (texture == null)
+                texture = EditorGUIUtility.FindTexture(name);
+
+            return texture != null ? new GUIContent(texture, tooltip) : new GUIContent(fallbackText, tooltip);
         }
 
         /// <summary>

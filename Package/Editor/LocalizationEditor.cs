@@ -47,6 +47,7 @@ namespace PicoShot.Localization
         private void OnEnable()
         {
             _data = new LanguageEditorData();
+            _data.History.Changed += OnHistoryChanged;
             InitializeTabs();
 
             LoadLanguages(out var oldVersions);
@@ -79,8 +80,15 @@ namespace PicoShot.Localization
             Repaint();
         }
 
+        private void OnHistoryChanged()
+        {
+            GUIUtility.keyboardControl = 0;
+            Repaint();
+        }
+
         private void OnDisable()
         {
+            _data?.DisposeHistory();
             UnregisterEventHandlers();
             CompilationPipeline.compilationStarted -= OnBeforeCompile;
             EditorApplication.playModeStateChanged -= OnPlayModeChanged;

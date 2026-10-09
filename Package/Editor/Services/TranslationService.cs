@@ -25,9 +25,9 @@ namespace PicoShot.Localization.Editor.Services
         }
 
         /// <summary>
-        /// Translates a key into all missing target languages.
+        /// Translates a key into all missing target languages, or only into <paramref name="onlyLanguages"/> when given.
         /// </summary>
-        public async Task TranslateAndFill(string key)
+        public async Task TranslateAndFill(string key, IReadOnlyCollection<string> onlyLanguages = null)
         {
             if (!_data.LanguageData.TryGetValue(key, out var keyData))
                 return;
@@ -36,18 +36,18 @@ namespace PicoShot.Localization.Editor.Services
 
             if (LanguageEditorData.IsArrayKey(keyData))
             {
-                await TranslateAndFillArray(key, keyData, defaultLang);
+                await TranslateAndFillArray(key, keyData, defaultLang, onlyLanguages);
             }
             else
             {
-                await TranslateAndFillString(key, keyData, defaultLang);
+                await TranslateAndFillString(key, keyData, defaultLang, onlyLanguages);
             }
         }
 
         /// <summary>
         /// Translates a string value for the given key.
         /// </summary>
-        private async Task TranslateAndFillString(string key, Dictionary<string, object> keyData, string defaultLang)
+        private async Task TranslateAndFillString(string key, Dictionary<string, object> keyData, string defaultLang, IReadOnlyCollection<string> onlyLanguages)
         {
             string sourceText = null;
             string sourceLang = defaultLang;
@@ -75,7 +75,10 @@ namespace PicoShot.Localization.Editor.Services
                 return;
             }
 
-            var targetLanguages = _data.LanguageCodes.Where(l => l != sourceLang && string.IsNullOrWhiteSpace(keyData[l]?.ToString())).ToList();
+            var targetLanguages = _data.LanguageCodes
+                .Where(l => l != sourceLang && string.IsNullOrWhiteSpace(keyData[l]?.ToString()))
+                .Where(l => onlyLanguages == null || onlyLanguages.Contains(l))
+                .ToList();
 
             if (targetLanguages.Count == 0)
                 return;
@@ -113,7 +116,7 @@ namespace PicoShot.Localization.Editor.Services
         /// Translates array elements for the given key.
         /// Translates element by element, language by language to avoid API rate limits.
         /// </summary>
-        private async Task TranslateAndFillArray(string key, Dictionary<string, object> keyData, string defaultLang)
+        private async Task TranslateAndFillArray(string key, Dictionary<string, object> keyData, string defaultLang, IReadOnlyCollection<string> onlyLanguages)
         {
             List<string> sourceArray = null;
             string sourceLang = defaultLang;
@@ -143,7 +146,9 @@ namespace PicoShot.Localization.Editor.Services
                 return;
             }
 
-            var targetLanguages = _data.LanguageCodes.Where(l => l != sourceLang).ToList();
+            var targetLanguages = _data.LanguageCodes
+                .Where(l => l != sourceLang && (onlyLanguages == null || onlyLanguages.Contains(l)))
+                .ToList();
 
             // Initialize target arrays if needed
             foreach (var lang in targetLanguages)

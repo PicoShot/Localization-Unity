@@ -152,7 +152,7 @@ namespace PicoShot.Localization.Editor.Tabs
             Styles.DrawSectionTitle("Project Languages", count == 1 ? "1 language" : $"{count} languages");
 
             string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
-            var languages = GetOrderedProjectLanguages(defaultLang);
+            var languages = Data.GetLanguagesDefaultFirst();
 
             for (int i = 0; i < languages.Count; i++)
             {
@@ -164,17 +164,6 @@ namespace PicoShot.Localization.Editor.Tabs
                 GUILayout.Label("Only the default language is set up. Add the languages you want to ship from the list below.",
                     Styles.EmptyState);
             }
-        }
-
-        /// <summary>
-        /// Project languages with the default first, then by name.
-        /// </summary>
-        private List<string> GetOrderedProjectLanguages(string defaultLang)
-        {
-            return Data.LanguageCodes
-                .OrderByDescending(code => string.Equals(code, defaultLang, StringComparison.OrdinalIgnoreCase))
-                .ThenBy(code => LanguageDefinitions.GetDisplayName(code), StringComparer.CurrentCulture)
-                .ToList();
         }
 
         private void DrawProjectLanguageRow(string code, int index, string defaultLang)

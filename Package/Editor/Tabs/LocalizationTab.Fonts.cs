@@ -214,7 +214,7 @@ namespace PicoShot.Localization.Editor.Tabs
             Styles.DrawSectionTitle("Language Fonts", overrides == 1 ? "1 override" : $"{overrides} overrides");
 
             string defaultLang = config.DefaultLanguage;
-            var languages = GetOrderedProjectLanguages(defaultLang);
+            var languages = Data.GetLanguagesDefaultFirst();
 
             if (_previewLanguage == null || !Data.LanguageCodes.Contains(_previewLanguage))
                 _previewLanguage = languages.FirstOrDefault(code => !string.Equals(code, defaultLang, StringComparison.OrdinalIgnoreCase)) ?? defaultLang;

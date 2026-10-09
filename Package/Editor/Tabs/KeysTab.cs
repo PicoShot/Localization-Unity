@@ -2,30 +2,48 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
+using UnityEditor.IMGUI.Controls;
 using UnityEngine;
+using PicoShot.Localization.Config;
 using PicoShot.Localization.Data;
 using PicoShot.Localization.Editor.Data;
+using PicoShot.Localization.Editor.Mcp;
 using PicoShot.Localization.Editor.Services;
+using Styles = PicoShot.Localization.Editor.LocalizationEditorStyles;
 
 namespace PicoShot.Localization.Editor.Tabs
 {
     /// <summary>
-    /// Tab for managing translation keys with split-pane view.
+    /// Tab for browsing, creating and translating keys in a list + editor split view.
     /// </summary>
     public sealed class KeysTab : LocalizationEditorTabBase
     {
+        private const string NewKeyNameControl = "Keys.NewKeyName";
+        private const string NewKeyValueControl = "Keys.NewKeyValue";
+        private const float RowPadding = 6f;
+        private const float FieldMinHeight = 20f;
+        private const float ArrayIndexWidth = 24f;
+        private const float ArrayButtonWidth = 20f;
+        private const float IconButtonSize = 20f;
+
+        private static readonly string[] KeyTypeLabels = { "String", "Array" };
+
         private readonly TranslationService _translationService;
         private readonly JsonService _jsonService;
+        private SearchField _searchField;
+
         private bool _isResizingKeysList;
-        private string _newKey = "";
-        private string _newValue = "";
         private bool _pendingDelete;
         private bool _isTranslating;
         private float _keysListViewportHeight;
+        private float _detailsWidth;
+        private string _pendingFocusControl;
+        private string _arrayTargetLanguage;
 
-        private static Texture2D _transparentTexture;
-        private static GUIStyle _keyButtonStyleNormal;
-        private static GUIStyle _keyButtonStyleSelected;
+        private bool _showNewKeyForm;
+        private bool _newKeyIsArray;
+        private string _newKey = "";
+        private string _newValue = "";
 
         public KeysTab(LocalizationEditor editor, LanguageEditorData data) : base(editor, data)
         {
@@ -35,753 +53,1360 @@ namespace PicoShot.Localization.Editor.Tabs
 
         public override string TabName => "Keys";
 
+        private static string DefaultLanguage => LocalizationConfigProvider.Config.DefaultLanguage;
+        private static string ActionKeyName => Application.platform == RuntimePlatform.OSXEditor ? "Cmd" : "Ctrl";
+
         public override void Draw()
         {
+            Editor.wantsMouseMove = true;
+            var evt = Event.current;
+            if (evt.type == EventType.MouseMove)
+                Editor.Repaint();
+
+            if ((evt.type == EventType.ValidateCommand || evt.type == EventType.ExecuteCommand) && evt.commandName == "Find")
+            {
+                if (evt.type == EventType.ExecuteCommand)
+                    _searchField?.SetFocus();
+                evt.Use();
+            }
+
             EditorGUILayout.BeginVertical(GUILayout.ExpandHeight(true));
-
-            using (BeginBox())
             {
-                DrawViewSelectionSection();
-                DrawAddKeySection();
-                DrawSearchAndFilterSection();
+                DrawToolbar();
+                if (_showNewKeyForm)
+                    DrawNewKeyForm();
+
+                EditorGUILayout.Space(2);
+
+                EditorGUILayout.BeginHorizontal(
+                    GUILayout.ExpandHeight(true),
+                    GUILayout.MinHeight(120f),
+                    GUILayout.MaxHeight(float.MaxValue));
+                DrawKeysListPanel();
+                DrawResizeHandle();
+                DrawKeyDetailsPanel();
+                EditorGUILayout.EndHorizontal();
+
+                DrawStatusBar();
             }
-
-            EditorGUILayout.Space();
-
-            EditorGUILayout.BeginHorizontal(
-                GUILayout.ExpandHeight(true),
-                GUILayout.MinHeight(120f),
-                GUILayout.MaxHeight(float.MaxValue));
-            DrawKeysListPanel();
-            DrawResizeHandle();
-            DrawKeyDetailsPanel();
-            EditorGUILayout.EndHorizontal();
-
             EditorGUILayout.EndVertical();
+
+            ApplyPendingFocus();
         }
 
-        private void DrawViewSelectionSection()
+        private void ApplyPendingFocus()
         {
-            EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Views", EditorStyles.boldLabel);
+            if (_pendingFocusControl == null || Event.current.type != EventType.Repaint)
+                return;
 
-            EditorGUILayout.BeginHorizontal();
-            var views = new List<string> { "All Keys" };
-            views.AddRange(Data.GetViews());
+            EditorGUI.FocusTextInControl(_pendingFocusControl);
+            _pendingFocusControl = null;
+            Editor.Repaint();
+        }
 
-            if (!string.IsNullOrEmpty(Data.SelectedView) && !views.Any(v => v.Equals(Data.SelectedView, StringComparison.OrdinalIgnoreCase)))
+        #region Toolbar
+
+        private void DrawToolbar()
+        {
+            _searchField ??= new SearchField();
+
+            EditorGUILayout.BeginHorizontal(EditorStyles.toolbar);
             {
-                views.Add(Data.SelectedView);
+                var viewContent = new GUIContent(string.IsNullOrEmpty(Data.SelectedView) ? "All Keys" : Data.SelectedView,
+                    "Show the keys of one view (the part of the key name before the first delimiter).\nRight-click for view JSON import/export.");
+                var viewRect = GUILayoutUtility.GetRect(viewContent, EditorStyles.toolbarDropDown, GUILayout.MinWidth(80), GUILayout.MaxWidth(180));
+
+                var evt = Event.current;
+                if (evt.type == EventType.ContextClick && viewRect.Contains(evt.mousePosition))
+                {
+                    ShowViewContextMenu(viewRect);
+                    evt.Use();
+                }
+
+                if (EditorGUI.DropdownButton(viewRect, viewContent, FocusType.Passive, EditorStyles.toolbarDropDown))
+                    ShowViewMenu(viewRect);
+
+                GUILayout.Space(4);
+
+                var searchRect = GUILayoutUtility.GetRect(80f, 2000f, 18f, 18f, EditorStyles.toolbarSearchField, GUILayout.ExpandWidth(true));
+                searchRect.y += 1f;
+                Data.KeySearchFilter = _searchField.OnToolbarGUI(searchRect, Data.KeySearchFilter);
+
+                GUILayout.Space(4);
+
+                int activeFilters = CountActiveFilters();
+                var filterContent = new GUIContent(activeFilters > 0 ? $"Filter ({activeFilters})" : "Filter", "Filter by type and translation status");
+                var filterRect = GUILayoutUtility.GetRect(filterContent, EditorStyles.toolbarDropDown, GUILayout.Width(72));
+                if (EditorGUI.DropdownButton(filterRect, filterContent, FocusType.Passive, EditorStyles.toolbarDropDown))
+                    ShowFilterMenu(filterRect);
+
+                bool showForm = GUILayout.Toggle(_showNewKeyForm, new GUIContent("+ New Key", "Create a new key"),
+                    EditorStyles.toolbarButton, GUILayout.Width(70));
+                if (showForm != _showNewKeyForm)
+                {
+                    if (showForm)
+                        OpenNewKeyForm();
+                    else
+                        CloseNewKeyForm();
+
+                    GUIUtility.ExitGUI();
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void ShowViewMenu(Rect rect)
+        {
+            var menu = new GenericMenu();
+            menu.AddItem(new GUIContent($"All Keys ({Data.Keys.Count})"), string.IsNullOrEmpty(Data.SelectedView), () => SelectView(""));
+
+            var views = Data.GetViews().OrderBy(v => v, StringComparer.OrdinalIgnoreCase).ToList();
+            if (views.Count > 0)
+                menu.AddSeparator("");
+
+            char delimiter = Data.CurrentViewDelimiter;
+            foreach (var view in views)
+            {
+                string prefix = view + delimiter;
+                int count = Data.Keys.Count(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+                string captured = view;
+                menu.AddItem(new GUIContent($"{view} ({count})"),
+                    string.Equals(view, Data.SelectedView, StringComparison.OrdinalIgnoreCase),
+                    () => SelectView(captured));
             }
 
-            int currentIndex = string.IsNullOrEmpty(Data.SelectedView) ? 0 : views.FindIndex(v => v.Equals(Data.SelectedView, StringComparison.OrdinalIgnoreCase));
-            if (currentIndex < 0) currentIndex = 0;
+            menu.DropDown(rect);
+        }
 
-            string[] displayNames = views.Select(v => v == "All Keys" ? v : v.ToUpperInvariant()).ToArray();
-
-            int newIndex = EditorGUILayout.Popup(currentIndex, displayNames);
-            if (newIndex != currentIndex)
-            {
-                Data.SelectedView = newIndex == 0 ? "" : views[newIndex];
+        private void SelectView(string view)
+        {
+            Data.SelectedView = view;
+            if (!string.IsNullOrEmpty(Data.SelectedKey) && !Data.GetFilteredKeys().Contains(Data.SelectedKey))
                 Data.SelectedKey = null;
-                GUI.FocusControl(null);
-            }
-
-            if (!string.IsNullOrEmpty(Data.SelectedView))
-            {
-                if (GUILayout.Button("Export JSON", GUILayout.Width(85)))
-                {
-                    _jsonService.ExportViewToJson(Data.SelectedView);
-                    GUIUtility.ExitGUI();
-                }
-
-                if (GUILayout.Button("Import JSON", GUILayout.Width(85)))
-                {
-                    _jsonService.ImportViewFromJson(Data.SelectedView);
-                    GUIUtility.ExitGUI();
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.EndVertical();
+            GUIUtility.keyboardControl = 0;
+            Editor.Repaint();
         }
 
-        private void DrawAddKeySection()
+        private void ShowFilterMenu(Rect rect)
         {
-            EditorGUILayout.BeginVertical("box");
-            string title = string.IsNullOrEmpty(Data.SelectedView)
-                ? "Add New Key"
-                : $"Add New Key to '{Data.SelectedView}'";
-            EditorGUILayout.LabelField(title, EditorStyles.boldLabel);
+            var menu = new GenericMenu();
+            bool arrays = Data.ShowArrayKeysOnly;
+            bool strings = Data.ShowStringKeysOnly && !arrays;
+            bool untranslated = !string.IsNullOrEmpty(Data.UntranslatedLanguageFilter);
 
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Key Name:", GUILayout.Width(130));
-            Rect keyNameRect = EditorGUILayout.GetControlRect();
-            _newKey = LocalizationTextEditorPopup.FilterKeyName(EditorGUI.TextField(keyNameRect, _newKey));
-            if (string.IsNullOrEmpty(_newKey) && Event.current.type == EventType.Repaint)
+            menu.AddItem(new GUIContent("Type/All"), !strings && !arrays, () => SetTypeFilter(false, false));
+            menu.AddItem(new GUIContent("Type/Strings"), strings, () => SetTypeFilter(true, false));
+            menu.AddItem(new GUIContent("Type/Arrays"), arrays, () => SetTypeFilter(false, true));
+
+            menu.AddItem(new GUIContent("Status/All"), Data.StatusFilter == KeyStatusFilter.All && !untranslated,
+                () => SetStatusFilter(KeyStatusFilter.All, null));
+            menu.AddItem(new GUIContent("Status/Missing Translations"), Data.StatusFilter == KeyStatusFilter.Missing && !untranslated,
+                () => SetStatusFilter(KeyStatusFilter.Missing, null));
+            menu.AddItem(new GUIContent("Status/Has Problems"), Data.StatusFilter == KeyStatusFilter.Problems && !untranslated,
+                () => SetStatusFilter(KeyStatusFilter.Problems, null));
+            foreach (var lang in Data.GetLanguagesDefaultFirst())
             {
-                var placeholderRect = new Rect(keyNameRect.x + 4f, keyNameRect.y, keyNameRect.width - 8f, keyNameRect.height);
-                Color previousColor = GUI.contentColor;
-                GUI.contentColor = new Color(0.55f, 0.55f, 0.55f);
-                GUI.Label(placeholderRect, "e.g. UI.Settings.Shadow_Quality", EditorStyles.miniLabel);
-                GUI.contentColor = previousColor;
+                string captured = lang;
+                menu.AddItem(new GUIContent($"Status/Untranslated In/{LanguageDefinitions.GetDisplayName(lang)}"),
+                    string.Equals(Data.UntranslatedLanguageFilter, lang, StringComparison.OrdinalIgnoreCase),
+                    () => SetStatusFilter(KeyStatusFilter.All, captured));
             }
-            EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.BeginHorizontal();
-            string defaultLang = PicoShot.Localization.Config.LocalizationConfigProvider.Config.DefaultLanguage;
-            EditorGUILayout.LabelField($"Default Value ({defaultLang}):", GUILayout.Width(130));
-            _newValue = EditorGUILayout.TextField(_newValue);
-            EditorGUILayout.EndHorizontal();
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Search in Translations"), Data.SearchInTranslations,
+                () => Data.SearchInTranslations = !Data.SearchInTranslations);
+            menu.AddItem(new GUIContent("Sort by Name"), Data.SortKeysByName, () => Data.SortKeysByName = !Data.SortKeysByName);
 
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("Add String Key", GUILayout.Width(120), GUILayout.Height(25)))
-                AddKey(false);
-            if (GUILayout.Button("Add Array Key", GUILayout.Width(120), GUILayout.Height(25)))
-                AddKey(true);
-            EditorGUILayout.EndHorizontal();
+            menu.AddSeparator("");
+            if (CountActiveFilters() > 0)
+                menu.AddItem(new GUIContent("Clear Filters"), false, ClearFilters);
+            else
+                menu.AddDisabledItem(new GUIContent("Clear Filters"));
 
-            EditorGUILayout.EndVertical();
+            menu.DropDown(rect);
         }
 
-        private void DrawSearchAndFilterSection()
+        private void SetTypeFilter(bool stringsOnly, bool arraysOnly)
         {
-            EditorGUILayout.BeginVertical("box");
+            Data.ShowStringKeysOnly = stringsOnly;
+            Data.ShowArrayKeysOnly = arraysOnly;
+            Editor.Repaint();
+        }
 
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Search Keys:", GUILayout.Width(80));
-            Data.KeySearchFilter = EditorGUILayout.TextField(Data.KeySearchFilter);
-            if (GUILayout.Button("Clear", GUILayout.Width(60)))
+        private void SetStatusFilter(KeyStatusFilter status, string untranslatedLanguage)
+        {
+            Data.StatusFilter = status;
+            Data.UntranslatedLanguageFilter = untranslatedLanguage;
+            Editor.Repaint();
+        }
+
+        private int CountActiveFilters()
+        {
+            int count = 0;
+            if (Data.ShowArrayKeysOnly || Data.ShowStringKeysOnly)
+                count++;
+            if (Data.StatusFilter != KeyStatusFilter.All || !string.IsNullOrEmpty(Data.UntranslatedLanguageFilter))
+                count++;
+            return count;
+        }
+
+        private void ClearFilters()
+        {
+            Data.KeySearchFilter = "";
+            Data.ShowArrayKeysOnly = false;
+            Data.ShowStringKeysOnly = false;
+            Data.StatusFilter = KeyStatusFilter.All;
+            Data.UntranslatedLanguageFilter = null;
+            GUIUtility.keyboardControl = 0;
+            Editor.Repaint();
+        }
+
+        private void ShowViewContextMenu(Rect rect)
+        {
+            var menu = new GenericMenu();
+            string view = Data.SelectedView;
+
+            if (!string.IsNullOrEmpty(view))
             {
-                Data.KeySearchFilter = "";
-                GUI.FocusControl(null);
+                menu.AddItem(new GUIContent($"Export '{view}' to JSON…"), false, () => _jsonService.ExportViewToJson(view));
+                menu.AddItem(new GUIContent($"Import JSON into '{view}'…"), false, () =>
+                {
+                    Data.History.RecordAll("Import View JSON");
+                    _jsonService.ImportViewFromJson(view);
+                    Editor.Repaint();
+                });
             }
-            EditorGUILayout.EndHorizontal();
-
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Filter:", GUILayout.Width(80));
-
-            var newShowArrayKeys = EditorGUILayout.ToggleLeft("Array Keys", Data.ShowArrayKeysOnly, GUILayout.Width(100));
-            var newShowStringKeys = EditorGUILayout.ToggleLeft("String Keys", Data.ShowStringKeysOnly, GUILayout.Width(100));
-            Data.SortKeysByName = EditorGUILayout.ToggleLeft("Sort by Name", Data.SortKeysByName, GUILayout.Width(100));
-
-            if (newShowArrayKeys != Data.ShowArrayKeysOnly)
+            else
             {
-                Data.ShowArrayKeysOnly = newShowArrayKeys;
-                Data.ShowStringKeysOnly = false;
+                menu.AddDisabledItem(new GUIContent("Export View to JSON (select a view first)"));
+                menu.AddDisabledItem(new GUIContent("Import JSON into View (select a view first)"));
             }
 
-            if (newShowStringKeys != Data.ShowStringKeysOnly)
+            menu.DropDown(rect);
+        }
+
+        #endregion
+
+        #region New Key
+
+        private void OpenNewKeyForm()
+        {
+            _showNewKeyForm = true;
+            _pendingFocusControl = NewKeyNameControl;
+            Editor.Repaint();
+        }
+
+        private void CloseNewKeyForm()
+        {
+            _showNewKeyForm = false;
+            _newKey = "";
+            _newValue = "";
+            GUIUtility.keyboardControl = 0;
+            Editor.Repaint();
+        }
+
+        private string NewKeyPrefix => string.IsNullOrEmpty(Data.SelectedView) ? "" : Data.SelectedView + Data.CurrentViewDelimiter;
+
+        private void DrawNewKeyForm()
+        {
+            var evt = Event.current;
+            string focused = GUI.GetNameOfFocusedControl();
+            if (evt.type == EventType.KeyDown && (focused == NewKeyNameControl || focused == NewKeyValueControl))
             {
-                Data.ShowStringKeysOnly = newShowStringKeys;
-                Data.ShowArrayKeysOnly = false;
+                if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+                {
+                    evt.Use();
+                    TryCreateKey();
+                    GUIUtility.ExitGUI();
+                }
+                else if (evt.keyCode == KeyCode.Escape)
+                {
+                    evt.Use();
+                    CloseNewKeyForm();
+                    GUIUtility.ExitGUI();
+                }
             }
 
-            EditorGUILayout.EndHorizontal();
+            string prefix = NewKeyPrefix;
+            string defaultName = LanguageDefinitions.GetDisplayName(DefaultLanguage);
 
-            if (!string.IsNullOrEmpty(Data.UntranslatedLanguageFilter))
+            EditorGUILayout.BeginVertical(EditorStyles.helpBox);
             {
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField(" ", GUILayout.Width(80));
-                string languageName = LanguageDefinitions.GetDisplayName(Data.UntranslatedLanguageFilter);
-                GUILayout.Label($"Untranslated in {languageName}", LocalizationEditorStyles.Badge);
-                if (GUILayout.Button(new GUIContent("Clear", "Show all keys again"), EditorStyles.miniButton, GUILayout.Width(50)))
                 {
-                    Data.UntranslatedLanguageFilter = null;
-                    GUI.FocusControl(null);
+                    if (prefix.Length > 0)
+                        GUILayout.Label(prefix, Styles.RowLabelMuted, GUILayout.ExpandWidth(false));
+
+                    GUI.SetNextControlName(NewKeyNameControl);
+                    var nameRect = EditorGUILayout.GetControlRect(GUILayout.ExpandWidth(true));
+                    _newKey = LocalizationTextEditorPopup.FilterKeyName(EditorGUI.TextField(nameRect, _newKey));
+                    DrawFieldPlaceholder(nameRect, _newKey, "Key name, e.g. settings.shadow_quality");
+
+                    _newKeyIsArray = GUILayout.Toolbar(_newKeyIsArray ? 1 : 0, KeyTypeLabels, EditorStyles.miniButton, GUILayout.Width(110)) == 1;
                 }
-                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+
+                GUI.SetNextControlName(NewKeyValueControl);
+                var valueRect = EditorGUILayout.GetControlRect();
+                _newValue = EditorGUI.TextField(valueRect, _newValue);
+                DrawFieldPlaceholder(valueRect, _newValue, $"{defaultName} text (optional)");
+
+                EditorGUILayout.BeginHorizontal();
+                {
+                    string error = ValidateNewKey(out string fullKey);
+                    if (string.IsNullOrWhiteSpace(_newKey))
+                        GUILayout.Label("Enter to create · Esc to close", Styles.MutedLabel);
+                    else if (error != null)
+                        GUILayout.Label(error, Styles.WarningLabel);
+                    else
+                        GUILayout.Label($"Creates {fullKey}", Styles.MutedLabel);
+
+                    GUILayout.FlexibleSpace();
+
+                    if (GUILayout.Button("Close", EditorStyles.miniButton, GUILayout.Width(56)))
+                    {
+                        CloseNewKeyForm();
+                        GUIUtility.ExitGUI();
+                    }
+
+                    using (new EditorGUI.DisabledScope(error != null))
+                    {
+                        if (GUILayout.Button("Create", EditorStyles.miniButton, GUILayout.Width(56)))
+                        {
+                            TryCreateKey();
+                            GUIUtility.ExitGUI();
+                        }
+                    }
+                }
                 EditorGUILayout.EndHorizontal();
             }
-
-            var totalKeys = Data.Keys.Count;
-            var filteredCount = Data.GetFilteredKeys().Count;
-            EditorGUILayout.BeginHorizontal();
-            EditorGUILayout.LabelField("Found:", GUILayout.Width(80));
-            EditorGUILayout.LabelField($"{filteredCount} / {totalKeys} keys", EditorStyles.boldLabel);
-            EditorGUILayout.EndHorizontal();
-
             EditorGUILayout.EndVertical();
         }
+
+        private static void DrawFieldPlaceholder(Rect fieldRect, string value, string placeholder)
+        {
+            if (!string.IsNullOrEmpty(value) || Event.current.type != EventType.Repaint)
+                return;
+
+            var rect = new Rect(fieldRect.x + 4f, fieldRect.y, fieldRect.width - 8f, fieldRect.height);
+            GUI.Label(rect, placeholder, Styles.MutedLabel);
+        }
+
+        private string ValidateNewKey(out string fullKey)
+        {
+            string name = _newKey?.Trim() ?? "";
+            fullKey = NewKeyPrefix + name;
+
+            if (name.Length == 0)
+                return "Enter a key name";
+
+            string candidate = fullKey;
+            if (Data.Keys.Any(k => k.Equals(candidate, StringComparison.OrdinalIgnoreCase)))
+                return $"'{fullKey}' already exists";
+
+            return null;
+        }
+
+        /// <summary>
+        /// Creates the key and keeps the form open with focus on the name field, so several keys can be added in a row.
+        /// </summary>
+        private void TryCreateKey()
+        {
+            string error = ValidateNewKey(out string fullKey);
+            if (error != null)
+            {
+                Editor.ShowNotification(new GUIContent(error));
+                return;
+            }
+
+            Data.History.RecordKeys("Add Key", fullKey);
+            if (!Data.AddKey(fullKey, _newKeyIsArray))
+                return;
+
+            if (!string.IsNullOrEmpty(_newValue))
+            {
+                string defaultLang = DefaultLanguage;
+                var keyData = Data.LanguageData[fullKey];
+                if (_newKeyIsArray)
+                {
+                    foreach (var lang in Data.LanguageCodes)
+                        ((List<string>)keyData[lang]).Add(lang == defaultLang ? _newValue : "");
+                }
+                else
+                {
+                    keyData[defaultLang] = _newValue;
+                }
+                Data.HasUnsavedChanges = true;
+            }
+
+            _newKey = "";
+            _newValue = "";
+            _pendingFocusControl = NewKeyNameControl;
+            AutoScrollToSelectedKey();
+            Editor.Repaint();
+        }
+
+        #endregion
+
+        #region Keys List
 
         private void DrawKeysListPanel()
         {
             EditorGUILayout.BeginVertical(
-                "box",
                 GUILayout.Width(Data.KeysListPanelWidth),
                 GUILayout.ExpandHeight(true),
                 GUILayout.MaxHeight(float.MaxValue));
-            EditorGUILayout.LabelField("Keys", EditorStyles.boldLabel);
 
             var filteredKeys = Data.GetFilteredKeys();
-            int totalKeyCount = filteredKeys.Count;
+            int count = filteredKeys.Count;
+            float itemHeight = LanguageEditorData.KeyItemHeight;
 
-            Rect scrollViewRect = GUILayoutUtility.GetRect(
-                0f,
-                float.MaxValue,
-                0f,
-                float.MaxValue,
-                GUILayout.ExpandWidth(true),
-                GUILayout.ExpandHeight(true)
-            );
-            scrollViewRect.height = Mathf.Max(scrollViewRect.height, 50f);
-            _keysListViewportHeight = scrollViewRect.height;
+            Rect viewRect = GUILayoutUtility.GetRect(0f, float.MaxValue, 0f, float.MaxValue,
+                GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true));
+            viewRect.height = Mathf.Max(viewRect.height, 50f);
+            _keysListViewportHeight = viewRect.height;
 
-            int maxVisibleItems = Mathf.CeilToInt(scrollViewRect.height / LanguageEditorData.KeyItemHeight) + 1;
+            float contentHeight = count * itemHeight;
+            float contentWidth = contentHeight > viewRect.height ? viewRect.width - 14f : viewRect.width;
 
-            float totalContentHeight = totalKeyCount * LanguageEditorData.KeyItemHeight;
-            Data.KeysListScroll = GUI.BeginScrollView(
-                scrollViewRect,
-                Data.KeysListScroll,
-                new Rect(0, 0, scrollViewRect.width - 20, totalContentHeight)
-            );
-
-            if (totalKeyCount > 0)
+            Data.KeysListScroll = GUI.BeginScrollView(viewRect, Data.KeysListScroll, new Rect(0, 0, contentWidth, contentHeight));
+            if (count > 0)
             {
-                int startIndex = Mathf.FloorToInt(Data.KeysListScroll.y / LanguageEditorData.KeyItemHeight);
-                startIndex = Mathf.Max(0, startIndex);
-                int endIndex = Mathf.Min(startIndex + maxVisibleItems, totalKeyCount);
+                int start = Mathf.Max(0, Mathf.FloorToInt(Data.KeysListScroll.y / itemHeight));
+                int end = Mathf.Min(start + Mathf.CeilToInt(viewRect.height / itemHeight) + 1, count);
 
-                for (int i = startIndex; i < endIndex; i++)
-                {
-                    DrawKeyListItem(filteredKeys[i], i, scrollViewRect.width);
-                }
+                for (int i = start; i < end; i++)
+                    DrawKeyListItem(filteredKeys[i], i, contentWidth);
+            }
+            GUI.EndScrollView();
+
+            if (count == 0)
+            {
+                GUI.Label(viewRect, Data.Keys.Count == 0
+                        ? "No keys yet.\nUse + New Key to create one."
+                        : "No keys match the search or filters.",
+                    Styles.EmptyState);
             }
 
-            GUI.EndScrollView();
             EditorGUILayout.EndVertical();
         }
 
         private void DrawKeyListItem(string key, int index, float width)
         {
-            Rect keyRect = new Rect(4, index * LanguageEditorData.KeyItemHeight, width - 8, LanguageEditorData.KeyItemHeight);
+            var evt = Event.current;
+            var rect = new Rect(0f, index * LanguageEditorData.KeyItemHeight, width, LanguageEditorData.KeyItemHeight);
+            bool hover = rect.Contains(evt.mousePosition);
+            bool selected = key == Data.SelectedKey;
 
-            GUIStyle keyStyle = GetKeyButtonStyle(key == Data.SelectedKey);
+            Styles.DrawRowBackground(rect, index, hover, selected);
+            if (selected && evt.type == EventType.Repaint)
+                EditorGUI.DrawRect(new Rect(rect.x, rect.y, 2f, rect.height), Styles.Accent);
 
-            string typeIndicator = "Aa";
-            if (Data.LanguageData.TryGetValue(key, out var keyData) && keyData.Count > 0)
+            bool isArray = Data.LanguageData.TryGetValue(key, out var keyData) && LanguageEditorData.IsArrayKey(keyData);
+            var typeRect = new Rect(rect.x + RowPadding, rect.y, 22f, rect.height);
+            GUI.Label(typeRect, new GUIContent(isArray ? "[ ]" : "Aa", isArray ? "Array key" : "String key"), Styles.MutedLabel);
+
+            float right = rect.xMax - RowPadding;
+            var status = Data.GetKeyStatus(key);
+            if (status.Problems > 0)
             {
-                var firstValue = keyData.Values.FirstOrDefault();
-                if (firstValue is List<string> || firstValue is string[])
-                    typeIndicator = "[ ]";
+                float w = Styles.GetBadgeWidth("!");
+                Styles.DrawBadge(new Rect(right - w, rect.y, w, rect.height), "!", Styles.Danger, hover ? BuildProblemsTooltip(key) : null);
+                right -= w + 3f;
+            }
+            if (status.Missing > 0)
+            {
+                string text = status.Missing.ToString();
+                float w = Styles.GetBadgeWidth(text);
+                Styles.DrawBadge(new Rect(right - w, rect.y, w, rect.height), text, Styles.Warning, hover ? BuildMissingTooltip(key) : null);
+                right -= w + 3f;
             }
 
-            string displayKeyName = string.IsNullOrEmpty(Data.SelectedView) ? key : Data.GetLocalKeyName(key);
-            string buttonLabel = $"<color=#888888>{typeIndicator}</color> {displayKeyName}";
+            DrawKeyName(new Rect(typeRect.xMax, rect.y, Mathf.Max(0f, right - typeRect.xMax - 4f), rect.height), key, selected);
 
-            if (GUI.Button(keyRect, buttonLabel, keyStyle))
+            if (evt.type == EventType.MouseDown && evt.button == 0 && hover)
             {
-                Data.SelectedKey = key;
+                SelectKey(key);
+                if (evt.clickCount == 2)
+                    RenameKey();
+                evt.Use();
             }
+            else if (evt.type == EventType.ContextClick && hover)
+            {
+                SelectKey(key);
+                ShowKeyMenu(key, null);
+                evt.Use();
+            }
+        }
+
+        /// <summary>
+        /// Draws the key name; under "All Keys" the view prefix is muted so the local name stands out.
+        /// </summary>
+        private void DrawKeyName(Rect rect, string key, bool selected)
+        {
+            var style = selected ? Styles.RowLabelBold : Styles.RowLabel;
+
+            if (!string.IsNullOrEmpty(Data.SelectedView))
+            {
+                GUI.Label(rect, new GUIContent(Data.GetLocalKeyName(key), key), style);
+                return;
+            }
+
+            int delimiterIndex = key.IndexOf(Data.CurrentViewDelimiter);
+            if (delimiterIndex <= 0)
+            {
+                GUI.Label(rect, new GUIContent(key, key), style);
+                return;
+            }
+
+            var prefix = new GUIContent(key.Substring(0, delimiterIndex + 1));
+            float prefixWidth = Mathf.Min(Styles.RowLabelMuted.CalcSize(prefix).x, rect.width * 0.5f);
+            GUI.Label(new Rect(rect.x + 2f, rect.y, prefixWidth, rect.height), prefix, Styles.RowLabelMuted);
+            GUI.Label(new Rect(rect.x + prefixWidth, rect.y, rect.width - prefixWidth, rect.height),
+                new GUIContent(key.Substring(delimiterIndex + 1), key), style);
+        }
+
+        private string BuildMissingTooltip(string key)
+        {
+            var missing = Data.LanguageCodes
+                .Where(lang => !Data.IsTranslated(key, lang))
+                .Select(lang => LanguageDefinitions.GetDisplayName(lang));
+            return "Missing: " + string.Join(", ", missing);
+        }
+
+        private string BuildProblemsTooltip(string key)
+        {
+            var issues = Data.LanguageCodes
+                .Select(lang => (lang, issue: Data.GetTranslationIssue(key, lang)))
+                .Where(item => item.issue != null)
+                .Select(item => $"{LanguageDefinitions.GetDisplayName(item.lang)}: {item.issue}");
+            return string.Join("\n", issues);
+        }
+
+        private void SelectKey(string key)
+        {
+            if (Data.SelectedKey != key)
+                GUIUtility.keyboardControl = 0;
+            Data.SelectedKey = key;
+            Editor.Repaint();
         }
 
         private void DrawResizeHandle()
         {
             const float handleWidth = 5f;
-            Rect handleRect = EditorGUILayout.GetControlRect(
-                false,
-                0f,
-                GUILayout.Width(handleWidth),
-                GUILayout.ExpandHeight(true),
-                GUILayout.MaxHeight(float.MaxValue)
-            );
+            Rect handleRect = EditorGUILayout.GetControlRect(false, 0f,
+                GUILayout.Width(handleWidth), GUILayout.ExpandHeight(true), GUILayout.MaxHeight(float.MaxValue));
             handleRect.height = Mathf.Max(handleRect.height, 50f);
 
             EditorGUIUtility.AddCursorRect(handleRect, MouseCursor.ResizeHorizontal);
 
-            if (Event.current.type == EventType.MouseDown && handleRect.Contains(Event.current.mousePosition))
-            {
+            var evt = Event.current;
+            if (evt.type == EventType.MouseDown && handleRect.Contains(evt.mousePosition))
                 _isResizingKeysList = true;
-            }
 
             if (_isResizingKeysList)
             {
-                if (Event.current.type == EventType.MouseUp || Event.current.type == EventType.MouseLeaveWindow)
+                if (evt.type == EventType.MouseUp || evt.type == EventType.MouseLeaveWindow)
                 {
                     _isResizingKeysList = false;
                 }
-                else if (Event.current.type == EventType.MouseDrag)
+                else if (evt.type == EventType.MouseDrag)
                 {
                     float maxWidth = WindowPosition.width * LanguageEditorData.MaxKeysListWidthRatio;
-                    Data.KeysListPanelWidth = Mathf.Clamp(
-                        Data.KeysListPanelWidth + Event.current.delta.x,
-                        LanguageEditorData.MinKeysListWidth,
-                        maxWidth
-                    );
-                    Event.current.Use();
+                    Data.KeysListPanelWidth = Mathf.Clamp(Data.KeysListPanelWidth + evt.delta.x,
+                        LanguageEditorData.MinKeysListWidth, maxWidth);
+                    evt.Use();
                     Editor.Repaint();
                 }
             }
 
-            Color prevColor = GUI.color;
-            GUI.color = new Color(0.5f, 0.5f, 0.5f, 0.3f);
-            GUI.DrawTexture(handleRect, EditorGUIUtility.whiteTexture);
-            GUI.color = prevColor;
+            if (evt.type == EventType.Repaint)
+            {
+                var line = new Rect(handleRect.center.x, handleRect.y, 1f, handleRect.height);
+                EditorGUI.DrawRect(line, _isResizingKeysList ? Styles.Accent : Styles.Separator);
+            }
         }
+
+        #endregion
+
+        #region Key Details
 
         private void DrawKeyDetailsPanel()
         {
-            EditorGUILayout.BeginVertical(
-                GUILayout.ExpandWidth(true),
-                GUILayout.ExpandHeight(true),
-                GUILayout.MaxHeight(float.MaxValue));
+            EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true), GUILayout.MaxHeight(float.MaxValue));
 
-            if (!string.IsNullOrEmpty(Data.SelectedKey))
+            string key = Data.SelectedKey;
+            if (string.IsNullOrEmpty(key) || !Data.LanguageData.TryGetValue(key, out var keyData))
             {
-                EditorGUILayout.LabelField($"Key Details: {Data.SelectedKey}", EditorStyles.boldLabel);
-                Data.KeyDetailsScroll = EditorGUILayout.BeginScrollView(
-                    Data.KeyDetailsScroll,
-                    GUILayout.ExpandHeight(true),
-                    GUILayout.MaxHeight(float.MaxValue));
-
-                if (Data.LanguageData.TryGetValue(Data.SelectedKey, out var text))
-                {
-                    if (LanguageEditorData.IsArrayKey(text))
-                        DrawArrayKeyContent();
-                    else
-                        DrawStringKeyContent();
-
-                    EditorGUILayout.Space();
-                    DrawKeyActionButtons();
-                }
-                else
-                {
-                    EditorGUILayout.LabelField("Selected key not found.");
-                }
-
-                EditorGUILayout.EndScrollView();
+                DrawDetailsEmptyState();
             }
             else
             {
-                DrawHelpBox("Select a key from the list to view and edit its details.");
-            }
+                bool isArray = LanguageEditorData.IsArrayKey(keyData);
+                DrawKeyHeader(key, isArray);
 
-            EditorGUILayout.EndVertical();
-        }
-
-        private void DrawStringKeyContent()
-        {
-            EditorGUILayout.BeginVertical("box");
-            foreach (var lang in Data.LanguageCodes)
-            {
-                EditorGUILayout.BeginVertical();
-                var langName = LanguageDefinitions.GetDisplayName(lang);
-                EditorGUILayout.LabelField($"{langName}:", GUILayout.Width(120));
-
-                var currentText = Data.LanguageData[Data.SelectedKey][lang]?.ToString() ?? "";
-                Rect textRect = EditorGUILayout.GetControlRect();
-
-                EditorGUI.BeginDisabledGroup(true);
-                EditorGUI.TextField(textRect, currentText);
-                EditorGUI.EndDisabledGroup();
-
-                if (Event.current.type == EventType.MouseDown &&
-                    Event.current.clickCount == 2 &&
-                    textRect.Contains(Event.current.mousePosition))
+                Data.KeyDetailsScroll = EditorGUILayout.BeginScrollView(Data.KeyDetailsScroll,
+                    GUILayout.ExpandHeight(true), GUILayout.MaxHeight(float.MaxValue));
                 {
-                    OpenTextEditor(currentText, newText =>
+                    var probe = GUILayoutUtility.GetRect(0f, 0f, GUILayout.ExpandWidth(true));
+                    if (Event.current.type == EventType.Repaint && probe.width > 1f && Mathf.Abs(probe.width - _detailsWidth) > 0.5f)
                     {
-                        Data.LanguageData[Data.SelectedKey][lang] = newText;
-                        Data.HasUnsavedChanges = true;
+                        _detailsWidth = probe.width;
                         Editor.Repaint();
-                    });
-                    Event.current.Use();
-                }
+                    }
 
-                EditorGUILayout.EndVertical();
+                    if (isArray)
+                        DrawArrayEditor(key, keyData);
+                    else
+                        DrawStringEditor(key, keyData);
+
+                    EditorGUILayout.Space(8);
+                }
+                EditorGUILayout.EndScrollView();
             }
+
             EditorGUILayout.EndVertical();
         }
 
-        private void DrawArrayKeyContent()
+        private void DrawKeyHeader(string key, bool isArray)
         {
-            EditorGUILayout.BeginVertical("box");
+            var rect = GUILayoutUtility.GetRect(0f, 24f, GUILayout.ExpandWidth(true));
+            var menuRect = new Rect(rect.xMax - IconButtonSize - 2f, rect.y + 2f, IconButtonSize, rect.height - 4f);
 
-            var firstValue = Data.GetFirstValue(Data.SelectedKey);
-            var array = firstValue as List<string> ?? new List<string>();
-            DrawArrayElements(array);
+            string typeText = isArray ? "ARRAY" : "STRING";
+            float badgeWidth = Styles.GetBadgeWidth(typeText);
 
-            EditorGUILayout.Space(5);
+            int delimiterIndex = key.IndexOf(Data.CurrentViewDelimiter);
+            var viewContent = delimiterIndex > 0 ? new GUIContent($"view: {key.Substring(0, delimiterIndex)}") : null;
+            float viewWidth = viewContent != null ? Styles.MutedLabel.CalcSize(viewContent).x + 4f : 0f;
+
+            float x = rect.x + 2f;
+            var nameContent = new GUIContent(key, key);
+            float nameWidth = Mathf.Max(40f, Mathf.Min(Styles.SectionTitle.CalcSize(nameContent).x + 2f,
+                menuRect.x - x - badgeWidth - viewWidth - 16f));
+            GUI.Label(new Rect(x, rect.y, nameWidth, rect.height), nameContent, Styles.SectionTitle);
+            x += nameWidth + 6f;
+
+            Styles.DrawBadge(new Rect(x, rect.y, badgeWidth, rect.height), typeText, Styles.MutedText,
+                isArray ? "Array key: a list of strings" : "String key");
+            x += badgeWidth + 6f;
+
+            if (viewContent != null && x + viewWidth <= menuRect.x)
+                GUI.Label(new Rect(x, rect.y, viewWidth, rect.height), viewContent, Styles.MutedLabel);
+
+            if (GUI.Button(menuRect, EditorGUIUtility.IconContent("_Menu"), EditorStyles.iconButton))
+                ShowKeyMenu(key, menuRect);
 
             EditorGUILayout.BeginHorizontal();
-            if (GUILayout.Button("Add New Element", GUILayout.Width(120), GUILayout.Height(25)))
             {
-                Data.AddArrayElement(Data.SelectedKey);
-            }
+                int missing = CountMissingTargets(key);
+                string provider = Data.ActiveTranslationProvider.ToString();
+                string translateLabel = _isTranslating ? "Translating…"
+                    : missing > 0 ? $"Translate Missing ({missing})"
+                    : "All Translated";
 
-            if (GUILayout.Button("Clear Empty Elements", GUILayout.Width(140), GUILayout.Height(25)))
-            {
-                Data.ClearEmptyArrayElements(Data.SelectedKey);
+                using (new EditorGUI.DisabledScope(_isTranslating || missing == 0))
+                {
+                    if (GUILayout.Button(new GUIContent(translateLabel, $"Fill empty languages with {provider} ({ActionKeyName}+T)"),
+                            EditorStyles.miniButton, GUILayout.MinWidth(130)))
+                        TranslateMissing(key, null);
+                }
+
+                if (GUILayout.Button(new GUIContent("Rename", "Rename this key (F2)"), EditorStyles.miniButton, GUILayout.Width(64)))
+                    RenameKey();
+
+                if (isArray && GUILayout.Button(new GUIContent("+ Element", "Add an element to every language"), EditorStyles.miniButton, GUILayout.Width(72)))
+                    AddArrayElement(key);
+
+                GUILayout.FlexibleSpace();
+                GUILayout.Label(BuildStatusSummary(key), Styles.MutedLabelRight);
             }
             EditorGUILayout.EndHorizontal();
 
-            EditorGUILayout.EndVertical();
+            Styles.DrawSeparator(4f, 4f);
         }
 
-        private void DrawArrayElements(List<string> array)
+        private int CountMissingTargets(string key)
         {
-            bool elementDeleted = false;
-            int deleteIndex = -1;
+            string defaultLang = DefaultLanguage;
+            return Data.LanguageCodes.Count(lang => lang != defaultLang && !Data.IsTranslated(key, lang));
+        }
 
-            for (int i = 0; i < array.Count; i++)
+        private string BuildStatusSummary(string key)
+        {
+            var status = Data.GetKeyStatus(key);
+            int total = Data.LanguageCodes.Count;
+            string summary = $"{total - status.Missing}/{total} languages";
+            if (status.Problems > 0)
+                summary += status.Problems == 1 ? " · 1 problem" : $" · {status.Problems} problems";
+            return summary;
+        }
+
+        private void DrawDetailsEmptyState()
+        {
+            GUILayout.FlexibleSpace();
+
+            bool hasKeys = Data.Keys.Count > 0;
+            GUILayout.Label(hasKeys ? "No key selected" : "No keys yet", Styles.CenteredTitle);
+            GUILayout.Label(hasKeys
+                    ? "Select a key on the left to edit its translations."
+                    : "Create your first key with + New Key.",
+                Styles.EmptyState);
+
+            if (hasKeys)
             {
-                if (elementDeleted)
-                    break;
+                int missing = 0;
+                int problems = 0;
+                foreach (var key in Data.Keys)
+                {
+                    var status = Data.GetKeyStatus(key);
+                    if (status.Missing > 0) missing++;
+                    if (status.Problems > 0) problems++;
+                }
+                GUILayout.Label($"{Data.Keys.Count} keys · {missing} with missing translations · {problems} with problems", Styles.EmptyState);
+            }
 
-                EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.Space(6);
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.BeginVertical(GUILayout.Width(250));
+            {
+                string mod = ActionKeyName;
+                DrawShortcut("↑ / ↓", "Select previous / next key");
+                DrawShortcut("Alt + ↑ / ↓", "Move key up / down");
+                DrawShortcut("F2 or double-click", "Rename key");
+                DrawShortcut($"{mod} + T", "Translate missing languages");
+                DrawShortcut($"{mod} + F", "Search");
+                DrawShortcut($"{mod} + C", "Copy key name");
+                DrawShortcut($"{mod} + Z / {mod} + Y", "Undo / redo");
+                DrawShortcut("Delete", "Delete key");
+            }
+            EditorGUILayout.EndVertical();
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            GUILayout.FlexibleSpace();
+        }
+
+        private static void DrawShortcut(string keys, string description)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(keys, EditorStyles.miniBoldLabel, GUILayout.Width(120));
+            GUILayout.Label(description, Styles.MutedLabel);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        #endregion
+
+        #region String Editor
+
+        private void DrawStringEditor(string key, Dictionary<string, object> keyData)
+        {
+            string defaultLang = DefaultLanguage;
+            bool sourceEmpty = !keyData.TryGetValue(defaultLang, out var sourceValue) || string.IsNullOrWhiteSpace(sourceValue as string);
+
+            foreach (var lang in Data.GetLanguagesDefaultFirst())
+            {
+                bool isDefault = lang == defaultLang;
+                string text = keyData.TryGetValue(lang, out var value) ? value as string ?? "" : "";
+                string issue = isDefault ? null : Data.GetTranslationIssue(key, lang);
+                string captured = lang;
+
+                DrawLanguageFieldHeader(lang, isDefault, issue, text.Length,
+                    canTranslate: !sourceEmpty, hasText: text.Length > 0,
+                    onTranslate: () => TranslateMissing(key, captured),
+                    onExpand: () => OpenTextEditor(text, newText => SetStringValue(key, captured, newText, false)));
+
+                string newValue = DrawTextEditor($"Keys.Value.{lang}", text,
+                    isDefault ? "Source text" : "Not translated", GUILayout.ExpandWidth(true));
+                if (newValue != text)
+                    SetStringValue(key, lang, newValue, true);
+
+                EditorGUILayout.Space(6);
+            }
+        }
+
+        private void DrawLanguageFieldHeader(string lang, bool isDefault, string issue, int length,
+            bool canTranslate, bool hasText, Action onTranslate, Action onExpand)
+        {
+            var rect = GUILayoutUtility.GetRect(0f, 18f, GUILayout.ExpandWidth(true));
+            float right = rect.xMax;
+            string provider = Data.ActiveTranslationProvider.ToString();
+
+            if (onExpand != null)
+            {
+                var expandRect = new Rect(right - IconButtonSize, rect.y, IconButtonSize, rect.height);
+                if (GUI.Button(expandRect, Styles.Icon("editicon.sml", "…", "Edit in a larger window"), EditorStyles.iconButton))
+                    onExpand();
+                right -= IconButtonSize + 2f;
+            }
+
+            if (!isDefault && onTranslate != null)
+            {
+                var translateRect = new Rect(right - IconButtonSize, rect.y, IconButtonSize, rect.height);
+                using (new EditorGUI.DisabledScope(_isTranslating || !canTranslate))
+                {
+                    string tooltip = !canTranslate ? "Add source text first"
+                        : hasText ? $"Translate again with {provider}"
+                        : $"Translate with {provider}";
+                    if (GUI.Button(translateRect, Styles.Icon("Refresh", "↻", tooltip), EditorStyles.iconButton))
+                        onTranslate();
+                }
+                right -= IconButtonSize + 2f;
+            }
+
+            if (length > 0)
+            {
+                var countContent = new GUIContent(length.ToString(), "Characters");
+                float w = Styles.MutedLabelRight.CalcSize(countContent).x + 4f;
+                GUI.Label(new Rect(right - w, rect.y, w, rect.height), countContent, Styles.MutedLabelRight);
+                right -= w + 4f;
+            }
+
+            float x = rect.x;
+            var nameContent = new GUIContent(LanguageDefinitions.GetDisplayName(lang));
+            float nameWidth = Mathf.Min(EditorStyles.boldLabel.CalcSize(nameContent).x, Mathf.Max(0f, right - x));
+            GUI.Label(new Rect(x, rect.y, nameWidth, rect.height), nameContent, EditorStyles.boldLabel);
+            x += nameWidth + 2f;
+
+            var codeContent = new GUIContent(lang);
+            float codeWidth = Styles.MutedLabel.CalcSize(codeContent).x;
+            if (x + codeWidth < right)
+                GUI.Label(new Rect(x, rect.y, codeWidth, rect.height), codeContent, Styles.MutedLabel);
+            x += codeWidth + 6f;
+
+            if (isDefault)
+                x += Styles.DrawBadge(new Rect(x, rect.y, 0f, rect.height), "SOURCE", Styles.Accent,
+                    "Default language. Other languages are translated from it.") + 4f;
+
+            if (LanguageDefinitions.IsRightToLeft(lang))
+                x += Styles.DrawBadge(new Rect(x, rect.y, 0f, rect.height), "RTL", Styles.MutedText, "Right-to-left language") + 4f;
+
+            if (issue != null && right - x > 40f)
+                DrawIssue(new Rect(x + 2f, rect.y, right - x - 2f, rect.height), issue);
+        }
+
+        private static void DrawIssue(Rect rect, string issue)
+        {
+            GUI.Label(new Rect(rect.x, rect.y + (rect.height - 16f) * 0.5f, 16f, 16f),
+                EditorGUIUtility.IconContent("console.warnicon.sml"));
+            GUI.Label(new Rect(rect.x + 17f, rect.y, rect.width - 17f, rect.height), new GUIContent(issue, issue), Styles.WarningLabel);
+        }
+
+        /// <summary>
+        /// Word-wrapped text area that grows with its content, with a muted placeholder while empty.
+        /// </summary>
+        private static string DrawTextEditor(string controlName, string text, string placeholder, params GUILayoutOption[] options)
+        {
+            var allOptions = new List<GUILayoutOption>(options) { GUILayout.MinHeight(FieldMinHeight) };
+
+            GUI.SetNextControlName(controlName);
+            string result = EditorGUILayout.TextArea(text, Styles.TextArea, allOptions.ToArray());
+
+            if (string.IsNullOrEmpty(text) && Event.current.type == EventType.Repaint && GUI.GetNameOfFocusedControl() != controlName)
+                GUI.Label(GUILayoutUtility.GetLastRect(), placeholder, Styles.Placeholder);
+
+            return result;
+        }
+
+        private void SetStringValue(string key, string lang, string text, bool coalesce)
+        {
+            if (!Data.LanguageData.TryGetValue(key, out var keyData))
+                return;
+
+            Data.History.Record("Edit Translation", key, coalesce ? $"{key}|{lang}" : null);
+            keyData[lang] = text ?? "";
+            Data.HasUnsavedChanges = true;
+            Editor.Repaint();
+        }
+
+        #endregion
+
+        #region Array Editor
+
+        private void DrawArrayEditor(string key, Dictionary<string, object> keyData)
+        {
+            string defaultLang = DefaultLanguage;
+            var targets = Data.GetLanguagesDefaultFirst().Where(lang => lang != defaultLang).ToList();
+            if (targets.Count > 0 && (_arrayTargetLanguage == null || !targets.Contains(_arrayTargetLanguage)))
+                _arrayTargetLanguage = targets[0];
+            string target = targets.Count > 0 ? _arrayTargetLanguage : null;
+
+            var source = keyData.TryGetValue(defaultLang, out var sourceValue) ? sourceValue as List<string> : null;
+            var targetList = target != null && keyData.TryGetValue(target, out var targetValue) ? targetValue as List<string> : null;
+            int count = source?.Count ?? LanguageEditorData.ConvertToList(Data.GetFirstValue(key))?.Count ?? 0;
+
+            if (target != null)
+                DrawArrayTargetSelector(key, targets, target, source);
+
+            float buttonsWidth = ArrayButtonWidth * 3f;
+            float available = Mathf.Max(160f, (_detailsWidth > 1f ? _detailsWidth : 400f) - ArrayIndexWidth - buttonsWidth - 28f);
+            float columnWidth = target != null ? (available - 6f) * 0.5f : available;
+
+            EditorGUILayout.BeginHorizontal();
+            {
+                GUILayout.Space(ArrayIndexWidth + 4f);
+                GUILayout.Label($"{LanguageDefinitions.GetDisplayName(defaultLang)} (source)", EditorStyles.miniBoldLabel, GUILayout.Width(columnWidth));
+                if (target != null)
+                    GUILayout.Label(LanguageDefinitions.GetDisplayName(target), EditorStyles.miniBoldLabel, GUILayout.Width(columnWidth));
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (count == 0)
+                GUILayout.Label("No elements yet. Use + Element to add one.", Styles.EmptyState);
+
+            int moveFrom = -1, moveTo = -1, removeIndex = -1;
+
+            for (int i = 0; i < count; i++)
+            {
+                string sourceText = source != null && i < source.Count ? source[i] ?? "" : "";
+                string targetText = targetList != null && i < targetList.Count ? targetList[i] ?? "" : "";
 
                 EditorGUILayout.BeginHorizontal();
-                EditorGUILayout.LabelField($"Element {i}", EditorStyles.boldLabel);
-
-                GUI.backgroundColor = Color.red;
-                if (GUILayout.Button("×", GUILayout.Width(25)) && EditorUtility.DisplayDialog("Delete Element",
-                        $"Are you sure you want to delete element {i}?", "Yes", "No"))
                 {
-                    deleteIndex = i;
-                    elementDeleted = true;
-                }
+                    GUILayout.Label(i.ToString(), Styles.MutedLabel, GUILayout.Width(ArrayIndexWidth), GUILayout.Height(FieldMinHeight));
 
-                GUI.backgroundColor = Color.white;
+                    string newSource = DrawTextEditor($"Keys.Element.{i}.Source", sourceText, "Source text", GUILayout.Width(columnWidth));
+                    if (newSource != sourceText)
+                        SetElementValue(key, defaultLang, i, newSource);
+
+                    if (target != null)
+                    {
+                        string newTarget = DrawTextEditor($"Keys.Element.{i}.Target", targetText, "Not translated", GUILayout.Width(columnWidth));
+                        if (newTarget != targetText)
+                            SetElementValue(key, target, i, newTarget);
+                    }
+
+                    using (new EditorGUI.DisabledScope(i == 0))
+                    {
+                        if (GUILayout.Button(new GUIContent("↑", "Move up"), EditorStyles.miniButtonLeft, GUILayout.Width(ArrayButtonWidth)))
+                        {
+                            moveFrom = i;
+                            moveTo = i - 1;
+                        }
+                    }
+                    using (new EditorGUI.DisabledScope(i == count - 1))
+                    {
+                        if (GUILayout.Button(new GUIContent("↓", "Move down"), EditorStyles.miniButtonMid, GUILayout.Width(ArrayButtonWidth)))
+                        {
+                            moveFrom = i;
+                            moveTo = i + 1;
+                        }
+                    }
+                    if (GUILayout.Button(new GUIContent("×", $"Remove element ({ActionKeyName}+Z to undo)"), EditorStyles.miniButtonRight, GUILayout.Width(ArrayButtonWidth)))
+                        removeIndex = i;
+                }
                 EditorGUILayout.EndHorizontal();
 
-                DrawArrayElementTranslations(i);
-
-                EditorGUILayout.EndVertical();
-            }
-
-            if (elementDeleted && deleteIndex >= 0)
-            {
-                Data.RemoveArrayElement(Data.SelectedKey, deleteIndex);
-            }
-        }
-
-        private void DrawArrayElementTranslations(int index)
-        {
-            foreach (var lang in Data.LanguageCodes)
-            {
-                var langName = LanguageDefinitions.GetDisplayName(lang);
-                EditorGUILayout.LabelField($"{langName}:", GUILayout.Width(120));
-
-                var langArray = (List<string>)Data.LanguageData[Data.SelectedKey][lang];
-                var currentText = langArray[index] ?? "";
-
-                Rect textRect = EditorGUILayout.GetControlRect();
-                EditorGUI.BeginDisabledGroup(true);
-                EditorGUI.TextField(textRect, currentText);
-                EditorGUI.EndDisabledGroup();
-
-                if (Event.current.type == EventType.MouseDown &&
-                    Event.current.clickCount == 2 &&
-                    textRect.Contains(Event.current.mousePosition))
+                if (target != null && !string.IsNullOrWhiteSpace(sourceText) && !string.IsNullOrWhiteSpace(targetText))
                 {
-                    int capturedIndex = index;
-                    OpenTextEditor(currentText, (newText) =>
+                    string issue = McpTextChecks.FindMismatch(sourceText, targetText);
+                    if (issue != null)
                     {
-                        langArray[capturedIndex] = newText;
-                        Data.HasUnsavedChanges = true;
-                        Editor.Repaint();
-                    });
-                    Event.current.Use();
+                        var issueRect = GUILayoutUtility.GetRect(0f, 18f, GUILayout.ExpandWidth(true));
+                        issueRect.xMin += ArrayIndexWidth + columnWidth + 10f;
+                        DrawIssue(issueRect, issue);
+                    }
                 }
+
+                EditorGUILayout.Space(2);
+            }
+
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            {
+                if (GUILayout.Button("+ Add Element", EditorStyles.miniButton, GUILayout.Width(100)))
+                    AddArrayElement(key);
+
+                if (GUILayout.Button(new GUIContent("Remove Empty Elements", "Remove elements that are empty in every language"),
+                        EditorStyles.miniButton, GUILayout.Width(150)))
+                {
+                    Data.History.Record("Remove Empty Elements", key);
+                    Data.ClearEmptyArrayElements(key);
+                    GUIUtility.keyboardControl = 0;
+                }
+                GUILayout.FlexibleSpace();
+            }
+            EditorGUILayout.EndHorizontal();
+
+            if (moveFrom >= 0)
+            {
+                Data.History.Record("Move Array Element", key);
+                Data.MoveArrayElement(key, moveFrom, moveTo);
+                GUIUtility.keyboardControl = 0;
+            }
+            else if (removeIndex >= 0)
+            {
+                Data.History.Record("Remove Array Element", key);
+                Data.RemoveArrayElement(key, removeIndex);
+                GUIUtility.keyboardControl = 0;
+                Editor.ShowNotification(new GUIContent($"Element {removeIndex} removed ({ActionKeyName}+Z to undo)"));
             }
         }
 
-        private void DrawKeyActionButtons()
+        private void DrawArrayTargetSelector(string key, List<string> targets, string target, List<string> source)
         {
             EditorGUILayout.BeginHorizontal();
+            {
+                GUILayout.Label("Translate into", Styles.MutedLabel, GUILayout.Width(80));
 
-            if (GUILayout.Button("Rename", GUILayout.Width(65)))
-                RenameKey();
+                int index = targets.IndexOf(target);
+                var names = targets.Select(lang => $"{LanguageDefinitions.GetDisplayName(lang)} ({lang})").ToArray();
+                int newIndex = EditorGUILayout.Popup(index, names, GUILayout.MaxWidth(220));
+                if (newIndex != index)
+                {
+                    _arrayTargetLanguage = targets[newIndex];
+                    GUIUtility.keyboardControl = 0;
+                }
 
-            EditorGUI.BeginDisabledGroup(_isTranslating);
-            if (GUILayout.Button(_isTranslating ? "Translating..." : "Translate", GUILayout.Width(85)))
-                ExecuteTranslation();
-            EditorGUI.EndDisabledGroup();
+                bool sourceEmpty = source == null || source.All(string.IsNullOrWhiteSpace);
+                bool translated = Data.IsTranslated(key, target);
+                using (new EditorGUI.DisabledScope(_isTranslating || sourceEmpty || translated))
+                {
+                    var content = new GUIContent($"Translate {LanguageDefinitions.GetDisplayName(target)}",
+                        sourceEmpty ? "Add source text first" : $"Fill empty elements with {Data.ActiveTranslationProvider}");
+                    if (GUILayout.Button(content, EditorStyles.miniButton, GUILayout.ExpandWidth(false)))
+                        TranslateMissing(key, target);
+                }
 
-            if (GUILayout.Button("Copy", GUILayout.Width(55)))
-                ShowCopyKeyMenu();
-
-            if (GUILayout.Button("JSON", GUILayout.Width(50)))
-                ShowJsonOptionsMenu();
-
+                GUILayout.FlexibleSpace();
+            }
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(4);
+        }
 
-            EditorGUILayout.Space(3);
+        private void SetElementValue(string key, string lang, int index, string text)
+        {
+            if (!Data.LanguageData.TryGetValue(key, out var keyData) || !(keyData.TryGetValue(lang, out var value) && value is List<string> list) || index >= list.Count)
+                return;
 
-            EditorGUILayout.BeginHorizontal();
-            GUI.backgroundColor = Color.red;
+            Data.History.Record("Edit Translation", key, $"{key}|{lang}|{index}");
+            list[index] = text ?? "";
+            Data.HasUnsavedChanges = true;
+        }
 
-            if (GUILayout.Button("Clear", GUILayout.Width(65)))
-                ClearKeyData();
+        private void AddArrayElement(string key)
+        {
+            Data.History.Record("Add Array Element", key);
+            Data.AddArrayElement(key);
+            Editor.Repaint();
+        }
 
-            if (GUILayout.Button("Delete", GUILayout.Width(65)))
-                ConfirmDeleteKey();
+        #endregion
 
-            GUI.backgroundColor = Color.white;
+        #region Status Bar
+
+        private void DrawStatusBar()
+        {
+            Styles.DrawSeparator(2f, 0f);
+
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(Data.KeySearchFilter))
+                parts.Add($"search \"{Data.KeySearchFilter}\"");
+            if (Data.ShowArrayKeysOnly)
+                parts.Add("arrays only");
+            else if (Data.ShowStringKeysOnly)
+                parts.Add("strings only");
+            if (!string.IsNullOrEmpty(Data.UntranslatedLanguageFilter))
+                parts.Add($"untranslated in {LanguageDefinitions.GetDisplayName(Data.UntranslatedLanguageFilter)}");
+            else if (Data.StatusFilter == KeyStatusFilter.Missing)
+                parts.Add("missing translations");
+            else if (Data.StatusFilter == KeyStatusFilter.Problems)
+                parts.Add("has problems");
+
+            int total = Data.Keys.Count;
+            int shown = Data.GetFilteredKeys().Count;
+            string text = shown == total ? $"{total} keys" : $"{shown} / {total} keys";
+            if (parts.Count > 0)
+                text += " · " + string.Join(" · ", parts);
+
+            EditorGUILayout.BeginHorizontal(GUILayout.Height(20));
+            {
+                GUILayout.Label(text, Styles.MutedLabel);
+                GUILayout.FlexibleSpace();
+                if (parts.Count > 0 && GUILayout.Button("Clear Filters", EditorStyles.miniButton, GUILayout.Width(80)))
+                    ClearFilters();
+            }
             EditorGUILayout.EndHorizontal();
         }
 
-        private void ShowCopyKeyMenu()
+        #endregion
+
+        #region Key Actions
+
+        private void ShowKeyMenu(string key, Rect? dropDownRect)
         {
-            GenericMenu menu = new GenericMenu();
+            var menu = new GenericMenu();
+            bool isArray = Data.LanguageData.TryGetValue(key, out var keyData) && LanguageEditorData.IsArrayKey(keyData);
+            string snippet = isArray ? $"LocalizationManager.GetArray(\"{key}\")" : $"LocalizationManager.GetText(\"{key}\")";
 
-            menu.AddItem(new GUIContent("Copy Key Name"), false, () =>
-            {
-                EditorGUIUtility.systemCopyBuffer = Data.SelectedKey;
-                Editor.ShowNotification(new GUIContent($"Key '{Data.SelectedKey}' copied to clipboard!"));
-            });
+            menu.AddItem(new GUIContent("Copy Key Name"), false, () => CopyToClipboard(key, $"Copied '{key}'"));
+            menu.AddItem(new GUIContent(isArray ? "Copy GetArray() Snippet" : "Copy GetText() Snippet"), false,
+                () => CopyToClipboard(snippet, "Snippet copied"));
 
-            menu.AddItem(new GUIContent("Copy with GetText()"), false, () =>
-            {
-                EditorGUIUtility.systemCopyBuffer = $"LocalizationManager.GetText(\"{Data.SelectedKey}\")";
-                Editor.ShowNotification(new GUIContent("GetText() snippet copied!"));
-            });
-
-            menu.AddItem(new GUIContent("Copy with GetArray()"), false, () =>
-            {
-                EditorGUIUtility.systemCopyBuffer = $"LocalizationManager.GetArray(\"{Data.SelectedKey}\")";
-                Editor.ShowNotification(new GUIContent("GetArray() snippet copied!"));
-            });
-
-            menu.ShowAsContext();
-        }
-
-        private void ShowJsonOptionsMenu()
-        {
-            GenericMenu menu = new GenericMenu();
-
-            menu.AddItem(new GUIContent("Copy as JSON"), false, () =>
-            {
-                _jsonService.CopyKeyAsJson(Data.SelectedKey, Editor);
-            });
-
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Copy as JSON"), false, () => _jsonService.CopyKeyAsJson(key, Editor));
             menu.AddItem(new GUIContent("Paste from JSON"), false, () =>
             {
-                _jsonService.PasteKeyFromJson(Data.SelectedKey, Editor);
+                Data.History.Record("Paste Key JSON", key);
+                _jsonService.PasteKeyFromJson(key, Editor);
+                GUIUtility.keyboardControl = 0;
+                Editor.Repaint();
             });
 
-            menu.ShowAsContext();
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Rename…"), false, () =>
+            {
+                Data.SelectedKey = key;
+                RenameKey();
+            });
+            if (!_isTranslating && CountMissingTargets(key) > 0)
+                menu.AddItem(new GUIContent("Translate Missing"), false, () => TranslateMissing(key, null));
+            else
+                menu.AddDisabledItem(new GUIContent("Translate Missing"));
+
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("Clear Translations"), false, () => ClearKeyData(key));
+            menu.AddItem(new GUIContent("Delete Key…"), false, () => ConfirmDeleteKey(key));
+
+            if (dropDownRect.HasValue)
+                menu.DropDown(dropDownRect.Value);
+            else
+                menu.ShowAsContext();
         }
 
-        private async void ExecuteTranslation()
+        private void CopyToClipboard(string text, string message)
         {
-            if (_isTranslating || string.IsNullOrEmpty(Data.SelectedKey)) return;
+            EditorGUIUtility.systemCopyBuffer = text;
+            Editor.ShowNotification(new GUIContent(message));
+        }
+
+        private async void TranslateMissing(string key, string onlyLanguage)
+        {
+            if (_isTranslating || string.IsNullOrEmpty(key) || !Data.LanguageData.TryGetValue(key, out var keyData))
+                return;
+
+            Data.History.Record("Translate Key", key);
+            GUIUtility.keyboardControl = 0;
+
+            string previous = null;
+            if (onlyLanguage != null && keyData.TryGetValue(onlyLanguage, out var current) &&
+                current is string currentText && !string.IsNullOrWhiteSpace(currentText))
+            {
+                previous = currentText;
+                keyData[onlyLanguage] = "";
+            }
 
             _isTranslating = true;
             Editor.Repaint();
 
             try
             {
-                await _translationService.TranslateAndFill(Data.SelectedKey);
-                Editor.ShowNotification(new GUIContent("Translation completed successfully!"));
+                await _translationService.TranslateAndFill(key, onlyLanguage != null ? new[] { onlyLanguage } : null);
+                Editor.ShowNotification(new GUIContent("Translation finished"));
             }
             catch (Exception ex)
             {
                 Debug.LogError($"Translation failed: {ex.Message}");
-                Editor.ShowNotification(new GUIContent("Translation failed!"));
+                Editor.ShowNotification(new GUIContent("Translation failed. See the Console for details."));
             }
             finally
             {
+                if (previous != null && keyData.TryGetValue(onlyLanguage, out var after) && string.IsNullOrWhiteSpace(after as string))
+                    keyData[onlyLanguage] = previous;
+
                 _isTranslating = false;
+                Data.MarkKeysChanged();
                 Editor.Repaint();
-            }
-        }
-
-        private void AddKey(bool isArray)
-        {
-            string cleanKey = _newKey?.Trim();
-            if (string.IsNullOrEmpty(cleanKey)) return;
-
-            string fullKey = string.IsNullOrEmpty(Data.SelectedView) ? cleanKey : $"{Data.SelectedView}{Data.CurrentViewDelimiter}{cleanKey}";
-            if (Data.AddKey(fullKey, isArray))
-            {
-                if (!string.IsNullOrEmpty(_newValue))
-                {
-                    string defaultLang = Config.LocalizationConfigProvider.Config.DefaultLanguage;
-                    if (isArray)
-                    {
-                        foreach (var lang in Data.LanguageCodes)
-                        {
-                            var list = (List<string>)Data.LanguageData[fullKey][lang];
-                            list.Add(lang == defaultLang ? _newValue : "");
-                        }
-                    }
-                    else
-                    {
-                        Data.LanguageData[fullKey][defaultLang] = _newValue;
-                    }
-                }
-
-                _newKey = "";
-                _newValue = "";
-                GUI.FocusControl(null);
-                GUIUtility.keyboardControl = 0;
-                EditorUtility.SetDirty(Editor);
-                Editor.Repaint();
-            }
-            else
-            {
-                Editor.ShowNotification(new GUIContent($"Key '{fullKey}' already exists."));
             }
         }
 
         private void RenameKey()
         {
-            var key = Data.SelectedKey;
-            string localName = Data.GetLocalKeyName(key);
-            string prefix = string.IsNullOrEmpty(Data.SelectedView) ? "" : $"{Data.SelectedView}{Data.CurrentViewDelimiter}";
+            string key = Data.SelectedKey;
+            if (string.IsNullOrEmpty(key))
+                return;
 
-            OpenTextEditor(localName, (newLocalKey) =>
+            string viewPrefix = string.IsNullOrEmpty(Data.SelectedView) ? "" : Data.SelectedView + Data.CurrentViewDelimiter;
+            bool inView = viewPrefix.Length > 0 && key.StartsWith(viewPrefix, StringComparison.OrdinalIgnoreCase);
+            string prefix = inView ? key.Substring(0, viewPrefix.Length) : "";
+            string editable = inView ? key.Substring(prefix.Length) : key;
+
+            OpenTextEditor(editable, newName =>
             {
-                if (string.IsNullOrEmpty(newLocalKey))
+                newName = LocalizationTextEditorPopup.FilterKeyName(newName?.Trim() ?? "");
+                if (string.IsNullOrEmpty(newName))
                 {
                     Editor.ShowNotification(new GUIContent("Key name cannot be empty."));
                     return;
                 }
 
-                newLocalKey = LocalizationTextEditorPopup.FilterKeyName(newLocalKey);
-                if (string.IsNullOrEmpty(newLocalKey))
+                string newFullKey = prefix + newName;
+                if (newFullKey == key)
+                    return;
+
+                if (Data.Keys.Any(k => !k.Equals(key, StringComparison.OrdinalIgnoreCase) && k.Equals(newFullKey, StringComparison.OrdinalIgnoreCase)))
                 {
-                    Editor.ShowNotification(new GUIContent("Key name cannot be empty."));
+                    EditorUtility.DisplayDialog("Rename Key", $"Key '{newFullKey}' already exists (key names are case-insensitive).", "OK");
                     return;
                 }
 
-                string newFullKey = prefix + newLocalKey;
-
-                if (!Data.RenameKey(key, newFullKey))
-                {
-                    EditorUtility.DisplayDialog("Error", $"Key '{newFullKey}' already exists (key names are case-insensitive).", "OK");
-                    return;
-                }
-
+                Data.History.RecordKeys("Rename Key", key, newFullKey);
+                Data.RenameKey(key, newFullKey);
                 Editor.Repaint();
             }, isKeyName: true);
         }
 
-        private void ClearKeyData()
+        private void ClearKeyData(string key)
         {
-            if (!EditorUtility.DisplayDialog("Clear Key Data",
-                    $"Are you sure you want to clear all translations for key '{Data.SelectedKey}'?\nThis cannot be undone!",
-                    "Yes, Clear", "Cancel"))
-                return;
-
-            Data.ClearKeyTranslations(Data.SelectedKey);
-            Editor.ShowNotification(new GUIContent("All translations cleared."));
+            Data.History.Record("Clear Translations", key);
+            Data.ClearKeyTranslations(key);
+            GUIUtility.keyboardControl = 0;
+            Editor.ShowNotification(new GUIContent($"Translations cleared ({ActionKeyName}+Z to undo)"));
             Editor.Repaint();
         }
 
-        private void ConfirmDeleteKey()
+        private void ConfirmDeleteKey(string key)
         {
-            if (EditorUtility.DisplayDialog("Delete Key",
-                    $"Are you sure you want to delete the key '{Data.SelectedKey}'?", "Yes", "No"))
-            {
-                Data.RemoveKey(Data.SelectedKey);
-                Data.SelectedKey = "";
-                Editor.Repaint();
-            }
+            if (string.IsNullOrEmpty(key) || !EditorUtility.DisplayDialog("Delete Key",
+                    $"Delete the key '{key}' and all its translations?\n\nYou can undo this with {ActionKeyName}+Z.", "Delete", "Cancel"))
+                return;
+
+            var filtered = Data.GetFilteredKeys();
+            int index = IndexOf(filtered, key);
+            string next = index >= 0 && index + 1 < filtered.Count ? filtered[index + 1]
+                : index > 0 ? filtered[index - 1]
+                : null;
+
+            Data.History.RecordKeys("Delete Key", key);
+            Data.RemoveKey(key);
+            Data.SelectedKey = next;
+            GUIUtility.keyboardControl = 0;
+            Editor.Repaint();
         }
+
+        private static int IndexOf(IReadOnlyList<string> list, string value)
+        {
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (list[i] == value)
+                    return i;
+            }
+            return -1;
+        }
+
+        #endregion
+
+        #region Keyboard
 
         public override bool HandleKeyboardInput(Event evt)
         {
-            if (evt.type != EventType.KeyDown || string.IsNullOrEmpty(Data.SelectedKey))
+            if (evt.type != EventType.KeyDown)
                 return false;
 
-            bool ctrlPressed = (evt.modifiers & EventModifiers.Control) != 0;
-            var filteredKeys = Data.GetFilteredKeys().ToList();
-            int filteredIndex = filteredKeys.IndexOf(Data.SelectedKey);
-            int masterIndex = Data.Keys.IndexOf(Data.SelectedKey);
+            bool action = EditorGUI.actionKey;
 
             switch (evt.keyCode)
             {
                 case KeyCode.UpArrow:
-                    if (ctrlPressed && masterIndex > 0)
-                    {
-                        string key = Data.SelectedKey;
-                        Data.Keys.RemoveAt(masterIndex);
-                        Data.Keys.Insert(masterIndex - 1, key);
-                        Data.HasUnsavedChanges = true;
-                    }
-                    else if (filteredIndex > 0)
-                    {
-                        Data.SelectedKey = filteredKeys[filteredIndex - 1];
-                    }
-                    AutoScrollToSelectedKey();
-                    evt.Use();
-                    Editor.Repaint();
-                    return true;
-
                 case KeyCode.DownArrow:
-                    if (ctrlPressed && masterIndex < Data.Keys.Count - 1)
-                    {
-                        string key = Data.SelectedKey;
-                        Data.Keys.RemoveAt(masterIndex);
-                        Data.Keys.Insert(masterIndex + 1, key);
-                        Data.HasUnsavedChanges = true;
-                    }
-                    else if (filteredIndex < filteredKeys.Count - 1)
-                    {
-                        Data.SelectedKey = filteredKeys[filteredIndex + 1];
-                    }
-                    AutoScrollToSelectedKey();
+                    return HandleArrowKey(evt, evt.keyCode == KeyCode.UpArrow ? -1 : 1, evt.alt || action);
+
+                case KeyCode.Escape:
+                    if (_showNewKeyForm)
+                        CloseNewKeyForm();
+                    else if (!string.IsNullOrEmpty(Data.SelectedKey))
+                        Data.SelectedKey = null;
+                    else
+                        return false;
                     evt.Use();
                     Editor.Repaint();
                     return true;
+            }
 
-                case KeyCode.Backspace:
+            string key = Data.SelectedKey;
+            if (string.IsNullOrEmpty(key))
+                return false;
+
+            switch (evt.keyCode)
+            {
+                case KeyCode.F2:
+                    RenameKey();
+                    evt.Use();
+                    return true;
+
+                case KeyCode.T when action:
+                    TranslateMissing(key, null);
+                    evt.Use();
+                    return true;
+
+                case KeyCode.C when action:
+                    CopyToClipboard(key, $"Copied '{key}'");
+                    evt.Use();
+                    return true;
+
                 case KeyCode.Delete:
+                case KeyCode.Backspace:
                     if (_pendingDelete)
                         return false;
                     _pendingDelete = true;
                     EditorApplication.delayCall += () =>
                     {
-                        if (EditorUtility.DisplayDialog("Delete Key",
-                                $"Are you sure you want to delete the key '{Data.SelectedKey}'?", "Yes", "No"))
-                        {
-                            Data.RemoveKey(Data.SelectedKey);
-                        }
+                        ConfirmDeleteKey(key);
                         _pendingDelete = false;
-                        Editor.Repaint();
                     };
                     evt.Use();
-                    return true;
-
-                case KeyCode.T:
-                    if (ctrlPressed)
-                    {
-                        ExecuteTranslation();
-                        evt.Use();
-                        return true;
-                    }
-                    break;
-
-                case KeyCode.R:
-                    if (ctrlPressed)
-                    {
-                        RenameKey();
-                        evt.Use();
-                        return true;
-                    }
-                    break;
-
-                case KeyCode.C:
-                    if (ctrlPressed)
-                    {
-                        EditorGUIUtility.systemCopyBuffer = Data.SelectedKey;
-                        Editor.ShowNotification(new GUIContent($"Key '{Data.SelectedKey}' copied to clipboard!"));
-                        evt.Use();
-                        return true;
-                    }
-                    break;
-
-                case KeyCode.Escape:
-                    Data.SelectedKey = null;
-                    evt.Use();
-                    Editor.Repaint();
                     return true;
             }
 
             return false;
+        }
+
+        private bool HandleArrowKey(Event evt, int direction, bool reorder)
+        {
+            var filtered = Data.GetFilteredKeys();
+            if (filtered.Count == 0)
+                return false;
+
+            int index = string.IsNullOrEmpty(Data.SelectedKey) ? -1 : IndexOf(filtered, Data.SelectedKey);
+
+            if (index < 0)
+                Data.SelectedKey = filtered[direction > 0 ? 0 : filtered.Count - 1];
+            else if (reorder)
+                MoveSelectedKey(filtered, index, direction);
+            else
+                Data.SelectedKey = filtered[Mathf.Clamp(index + direction, 0, filtered.Count - 1)];
+
+            AutoScrollToSelectedKey();
+            evt.Use();
+            Editor.Repaint();
+            return true;
+        }
+
+        /// <summary>
+        /// Moves the selected key past its visible neighbour in the saved key order.
+        /// </summary>
+        private void MoveSelectedKey(IReadOnlyList<string> filtered, int index, int direction)
+        {
+            if (Data.SortKeysByName)
+            {
+                Editor.ShowNotification(new GUIContent("Turn off Sort by Name to reorder keys"));
+                return;
+            }
+
+            int neighbourIndex = index + direction;
+            if (neighbourIndex < 0 || neighbourIndex >= filtered.Count)
+                return;
+
+            string key = filtered[index];
+            string neighbour = filtered[neighbourIndex];
+
+            Data.History.RecordKeys("Reorder Key");
+            Data.Keys.Remove(key);
+            int target = Data.Keys.IndexOf(neighbour);
+            Data.Keys.Insert(direction > 0 ? target + 1 : target, key);
+            Data.HasUnsavedChanges = true;
         }
 
         private void AutoScrollToSelectedKey()
@@ -789,8 +1414,7 @@ namespace PicoShot.Localization.Editor.Tabs
             if (string.IsNullOrEmpty(Data.SelectedKey))
                 return;
 
-            var filteredKeys = Data.GetFilteredKeys().ToList();
-            int selectedIndex = filteredKeys.IndexOf(Data.SelectedKey);
+            int selectedIndex = IndexOf(Data.GetFilteredKeys(), Data.SelectedKey);
             if (selectedIndex < 0)
                 return;
 
@@ -799,62 +1423,16 @@ namespace PicoShot.Localization.Editor.Tabs
             float itemBottom = itemTop + LanguageEditorData.KeyItemHeight;
 
             if (itemTop < Data.KeysListScroll.y)
-            {
                 Data.KeysListScroll = new Vector2(Data.KeysListScroll.x, itemTop);
-            }
             else if (itemBottom > Data.KeysListScroll.y + viewportHeight)
-            {
                 Data.KeysListScroll = new Vector2(Data.KeysListScroll.x, itemBottom - viewportHeight);
-            }
         }
 
-        private static void OpenTextEditor(string text, System.Action<string> onSave, bool isKeyName = false)
+        #endregion
+
+        private static void OpenTextEditor(string text, Action<string> onSave, bool isKeyName = false)
         {
             LocalizationTextEditorPopup.Open(text, onSave, isKeyName);
-        }
-
-        private static GUIStyle GetKeyButtonStyle(bool isSelected)
-        {
-            if (_transparentTexture == null)
-            {
-                _transparentTexture = new Texture2D(1, 1) { hideFlags = HideFlags.HideAndDontSave };
-                _transparentTexture.SetPixel(0, 0, new Color(0, 0, 0, 0));
-                _transparentTexture.Apply();
-                _keyButtonStyleNormal = null;
-                _keyButtonStyleSelected = null;
-            }
-
-            if (_keyButtonStyleNormal == null)
-            {
-                _keyButtonStyleNormal = new GUIStyle(EditorStyles.miniButton)
-                {
-                    alignment = TextAnchor.MiddleLeft,
-                    padding = new RectOffset(0, 0, 2, 2),
-                    margin = new RectOffset(0, 0, 2, 2),
-                    normal =
-                    {
-                        textColor = EditorStyles.label.normal.textColor,
-                        background = _transparentTexture
-                    },
-                    hover = { textColor = Color.green },
-                    active = { textColor = Color.green },
-                    richText = true
-                };
-            }
-
-            if (_keyButtonStyleSelected == null)
-            {
-                _keyButtonStyleSelected = new GUIStyle(_keyButtonStyleNormal)
-                {
-                    normal =
-                    {
-                        textColor = Color.green,
-                        background = _transparentTexture
-                    }
-                };
-            }
-
-            return isSelected ? _keyButtonStyleSelected : _keyButtonStyleNormal;
         }
     }
 }

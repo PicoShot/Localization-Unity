@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 using PicoShot.Localization.Config;
+using PicoShot.Localization.Editor.Mcp;
 
 namespace PicoShot.Localization.Editor.Data
 {
@@ -10,6 +11,29 @@ namespace PicoShot.Localization.Editor.Data
     {
         DeepL,
         Gemini
+    }
+
+    public enum KeyStatusFilter
+    {
+        All,
+        Missing,
+        Problems
+    }
+
+    /// <summary>
+    /// Translation state of one key: how many languages are empty and how many have
+    /// placeholder or rich-text tag mismatches against the default language.
+    /// </summary>
+    public readonly struct KeyStatus
+    {
+        public readonly int Missing;
+        public readonly int Problems;
+
+        public KeyStatus(int missing, int problems)
+        {
+            Missing = missing;
+            Problems = problems;
+        }
     }
 
     public enum ViewDelimiter
@@ -52,6 +76,13 @@ namespace PicoShot.Localization.Editor.Data
         /// When set, the keys list only shows keys that are not yet translated in this language.
         /// </summary>
         public string UntranslatedLanguageFilter { get; set; }
+
+        public KeyStatusFilter StatusFilter { get; set; }
+
+        /// <summary>
+        /// When true, the key search also matches translation text.
+        /// </summary>
+        public bool SearchInTranslations { get; set; } = true;
 
         // Foldouts
         public bool ShowStatusSection { get; set; } = true;
@@ -100,6 +131,19 @@ namespace PicoShot.Localization.Editor.Data
         /// Incremented whenever keys or translations change; use it to invalidate cached derived data.
         /// </summary>
         public int DataVersion => _dataVersion;
+
+        private KeyEditHistory _history;
+
+        /// <summary>
+        /// Undo history for key and translation edits.
+        /// </summary>
+        public KeyEditHistory History => _history ??= new KeyEditHistory(this);
+
+        public void DisposeHistory()
+        {
+            _history?.Dispose();
+            _history = null;
+        }
 
         // Translation Provider Settings
         public const string TranslationProviderPref = "PicoShot_Localization_TranslationProvider";
@@ -211,6 +255,13 @@ namespace PicoShot.Localization.Editor.Data
         private bool _filteredStringsOnly;
         private bool _filteredSorted;
         private string _filteredUntranslated;
+        private KeyStatusFilter _filteredStatus;
+        private bool _filteredSearchInTranslations;
+        private string _filteredDefaultLanguage;
+
+        private int _statusVersion = -1;
+        private string _statusDefaultLanguage;
+        private readonly Dictionary<string, KeyStatus> _statusCache = new();
         private readonly List<string> _filteredKeys = new();
 
         private int _viewsVersion = -1;
@@ -241,7 +292,10 @@ namespace PicoShot.Localization.Editor.Data
                 _filteredArraysOnly == ShowArrayKeysOnly &&
                 _filteredStringsOnly == ShowStringKeysOnly &&
                 _filteredSorted == SortKeysByName &&
-                _filteredUntranslated == UntranslatedLanguageFilter)
+                _filteredUntranslated == UntranslatedLanguageFilter &&
+                _filteredStatus == StatusFilter &&
+                _filteredSearchInTranslations == SearchInTranslations &&
+                _filteredDefaultLanguage == LocalizationConfigProvider.Config.DefaultLanguage)
             {
                 return _filteredKeys;
             }
@@ -254,7 +308,8 @@ namespace PicoShot.Localization.Editor.Data
                 if (viewPrefix != null && !key.StartsWith(viewPrefix, StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (search.Length > 0 && key.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0)
+                if (search.Length > 0 && key.IndexOf(search, StringComparison.OrdinalIgnoreCase) < 0 &&
+                    !(SearchInTranslations && TranslationsContain(key, search)))
                     continue;
 
                 if (ShowArrayKeysOnly && !IsArrayKey(LanguageData[key]))
@@ -264,6 +319,12 @@ namespace PicoShot.Localization.Editor.Data
                     continue;
 
                 if (!string.IsNullOrEmpty(UntranslatedLanguageFilter) && IsTranslated(key, UntranslatedLanguageFilter))
+                    continue;
+
+                if (StatusFilter == KeyStatusFilter.Missing && GetKeyStatus(key).Missing == 0)
+                    continue;
+
+                if (StatusFilter == KeyStatusFilter.Problems && GetKeyStatus(key).Problems == 0)
                     continue;
 
                 _filteredKeys.Add(key);
@@ -281,6 +342,9 @@ namespace PicoShot.Localization.Editor.Data
             _filteredStringsOnly = ShowStringKeysOnly;
             _filteredSorted = SortKeysByName;
             _filteredUntranslated = UntranslatedLanguageFilter;
+            _filteredStatus = StatusFilter;
+            _filteredSearchInTranslations = SearchInTranslations;
+            _filteredDefaultLanguage = LocalizationConfigProvider.Config.DefaultLanguage;
             return _filteredKeys;
         }
 
@@ -361,6 +425,108 @@ namespace PicoShot.Localization.Editor.Data
             }
         }
 
+        private bool TranslationsContain(string key, string search)
+        {
+            if (!LanguageData.TryGetValue(key, out var keyData))
+                return false;
+
+            foreach (var value in keyData.Values)
+            {
+                switch (value)
+                {
+                    case string str when str.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0:
+                        return true;
+                    case IList<string> list:
+                        foreach (var item in list)
+                        {
+                            if (item != null && item.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0)
+                                return true;
+                        }
+                        break;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Gets the cached translation status of a key.
+        /// </summary>
+        public KeyStatus GetKeyStatus(string key)
+        {
+            string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
+            if (_statusVersion != _dataVersion || _statusDefaultLanguage != defaultLang)
+            {
+                _statusCache.Clear();
+                _statusVersion = _dataVersion;
+                _statusDefaultLanguage = defaultLang;
+            }
+
+            if (_statusCache.TryGetValue(key, out var status))
+                return status;
+
+            int missing = 0;
+            int problems = 0;
+            foreach (var lang in LanguageCodes)
+            {
+                if (!IsTranslated(key, lang))
+                    missing++;
+                else if (lang != defaultLang && GetTranslationIssue(key, lang) != null)
+                    problems++;
+            }
+
+            status = new KeyStatus(missing, problems);
+            _statusCache[key] = status;
+            return status;
+        }
+
+        /// <summary>
+        /// Describes placeholder or rich-text tag differences between a translation and the
+        /// default language, or returns null when they match. Array keys are compared element by element.
+        /// </summary>
+        public string GetTranslationIssue(string key, string language)
+        {
+            string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
+            if (language == defaultLang || !LanguageData.TryGetValue(key, out var keyData) ||
+                !keyData.TryGetValue(defaultLang, out var source) || !keyData.TryGetValue(language, out var target))
+                return null;
+
+            if (source is string sourceText && target is string targetText)
+            {
+                if (string.IsNullOrWhiteSpace(sourceText) || string.IsNullOrWhiteSpace(targetText))
+                    return null;
+                return McpTextChecks.FindMismatch(sourceText, targetText);
+            }
+
+            if (source is IList<string> sourceList && target is IList<string> targetList)
+            {
+                int count = Math.Min(sourceList.Count, targetList.Count);
+                for (int i = 0; i < count; i++)
+                {
+                    if (string.IsNullOrWhiteSpace(sourceList[i]) || string.IsNullOrWhiteSpace(targetList[i]))
+                        continue;
+
+                    string issue = McpTextChecks.FindMismatch(sourceList[i], targetList[i]);
+                    if (issue != null)
+                        return $"element {i}: {issue}";
+                }
+            }
+
+            return null;
+        }
+
+        /// <summary>
+        /// Project languages with the default language first, then by display name.
+        /// </summary>
+        public List<string> GetLanguagesDefaultFirst()
+        {
+            string defaultLang = LocalizationConfigProvider.Config.DefaultLanguage;
+            return LanguageCodes
+                .OrderByDescending(code => string.Equals(code, defaultLang, StringComparison.OrdinalIgnoreCase))
+                .ThenBy(code => PicoShot.Localization.Data.LanguageDefinitions.GetDisplayName(code), StringComparer.CurrentCulture)
+                .ToList();
+        }
+
         /// <summary>
         /// Counts the keys that are translated in the given language.
         /// </summary>
@@ -431,6 +597,7 @@ namespace PicoShot.Localization.Editor.Data
             LanguageCodes.Add(LocalizationConfigProvider.Config.DefaultLanguage);
             PendingRemovedLanguages.Clear();
             UntranslatedLanguageFilter = null;
+            _history?.Clear();
             GeneratedCharset = "";
             HasGeneratedCharset = false;
         }
@@ -661,6 +828,27 @@ namespace PicoShot.Localization.Editor.Data
                 if (LanguageData[key][lang] is List<string> langArray && index < langArray.Count)
                 {
                     langArray.RemoveAt(index);
+                }
+            }
+            HasUnsavedChanges = true;
+        }
+
+        /// <summary>
+        /// Moves an array element to another index in every language.
+        /// </summary>
+        public void MoveArrayElement(string key, int from, int to)
+        {
+            if (from == to || !LanguageData.TryGetValue(key, out var keyData))
+                return;
+
+            foreach (var lang in LanguageCodes)
+            {
+                if (keyData.TryGetValue(lang, out var value) && value is List<string> list &&
+                    from >= 0 && from < list.Count && to >= 0 && to < list.Count)
+                {
+                    string item = list[from];
+                    list.RemoveAt(from);
+                    list.Insert(to, item);
                 }
             }
             HasUnsavedChanges = true;
