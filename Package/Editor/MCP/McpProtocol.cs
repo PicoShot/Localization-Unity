@@ -26,7 +26,7 @@ namespace PicoShot.Localization.Editor.Mcp
     public static class McpProtocol
     {
         public const string ServerName = "picoshot-localization";
-        public const string ServerVersion = "2.2.1";
+        public const string ServerVersion = PackageVersion.Current;
 
         public const string ModernVersion = "2026-07-28";
 
