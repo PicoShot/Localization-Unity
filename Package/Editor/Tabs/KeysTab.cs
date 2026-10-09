@@ -16,7 +16,7 @@ namespace PicoShot.Localization.Editor.Tabs
     /// <summary>
     /// Tab for browsing, creating and translating keys in a list + editor split view.
     /// </summary>
-    public sealed class KeysTab : LocalizationEditorTabBase
+    public sealed partial class KeysTab : LocalizationEditorTabBase
     {
         private const string NewKeyNameControl = "Keys.NewKeyName";
         private const string NewKeyValueControl = "Keys.NewKeyValue";
@@ -72,6 +72,16 @@ namespace PicoShot.Localization.Editor.Tabs
             var evt = Event.current;
             if (evt.type == EventType.MouseMove)
                 Editor.Repaint();
+
+            SyncSelection();
+
+            if ((evt.type == EventType.ValidateCommand || evt.type == EventType.ExecuteCommand) &&
+                evt.commandName == "SelectAll" && GUIUtility.keyboardControl == 0)
+            {
+                if (evt.type == EventType.ExecuteCommand)
+                    SelectAllFiltered();
+                evt.Use();
+            }
 
             if (evt.type == EventType.KeyDown && EditorGUI.actionKey && evt.keyCode == KeyCode.E && OpenFocusedValueEditor())
                 evt.Use();
@@ -519,10 +529,11 @@ namespace PicoShot.Localization.Editor.Tabs
             var evt = Event.current;
             var rect = new Rect(0f, index * LanguageEditorData.KeyItemHeight, width, LanguageEditorData.KeyItemHeight);
             bool hover = rect.Contains(evt.mousePosition);
-            bool selected = key == Data.SelectedKey;
+            bool primary = key == Data.SelectedKey;
+            bool selected = primary || _selection.Contains(key);
 
             Styles.DrawRowBackground(rect, index, hover, selected);
-            if (selected && evt.type == EventType.Repaint)
+            if (primary && evt.type == EventType.Repaint)
                 EditorGUI.DrawRect(new Rect(rect.x, rect.y, 2f, rect.height), Styles.Accent);
 
             bool isArray = Data.LanguageData.TryGetValue(key, out var keyData) && LanguageEditorData.IsArrayKey(keyData);
@@ -545,19 +556,24 @@ namespace PicoShot.Localization.Editor.Tabs
                 right -= w + 3f;
             }
 
-            DrawKeyName(new Rect(typeRect.xMax, rect.y, Mathf.Max(0f, right - typeRect.xMax - 4f), rect.height), key, selected);
+            DrawKeyName(new Rect(typeRect.xMax, rect.y, Mathf.Max(0f, right - typeRect.xMax - 4f), rect.height), key, primary);
 
             if (evt.type == EventType.MouseDown && evt.button == 0 && hover)
             {
-                SelectKey(key);
-                if (evt.clickCount == 2)
-                    RenameKey();
+                HandleListClick(key, evt);
                 evt.Use();
             }
             else if (evt.type == EventType.ContextClick && hover)
             {
-                SelectKey(key);
-                ShowKeyMenu(key, null);
+                if (IsMultiSelect && _selection.Contains(key))
+                {
+                    ShowSelectionMenu(null);
+                }
+                else
+                {
+                    SelectKey(key);
+                    ShowKeyMenu(key, null);
+                }
                 evt.Use();
             }
         }
@@ -611,6 +627,10 @@ namespace PicoShot.Localization.Editor.Tabs
             if (Data.SelectedKey != key)
                 GUIUtility.keyboardControl = 0;
             Data.SelectedKey = key;
+            _selection.Clear();
+            if (!string.IsNullOrEmpty(key))
+                _selection.Add(key);
+            _anchor = key;
             Editor.Repaint();
         }
 
@@ -659,7 +679,11 @@ namespace PicoShot.Localization.Editor.Tabs
             EditorGUILayout.BeginVertical(GUILayout.ExpandWidth(true), GUILayout.ExpandHeight(true), GUILayout.MaxHeight(float.MaxValue));
 
             string key = Data.SelectedKey;
-            if (string.IsNullOrEmpty(key) || !Data.LanguageData.TryGetValue(key, out var keyData))
+            if (IsMultiSelect)
+            {
+                DrawSelectionPanel();
+            }
+            else if (string.IsNullOrEmpty(key) || !Data.LanguageData.TryGetValue(key, out var keyData))
             {
                 DrawDetailsEmptyState();
             }
@@ -805,6 +829,8 @@ namespace PicoShot.Localization.Editor.Tabs
                 DrawShortcut($"{mod} + C", "Copy key name");
                 DrawShortcut($"{mod} + Z / {mod} + Y", "Undo / redo");
                 DrawShortcut("Delete", "Delete key");
+                DrawShortcut($"{mod} / Shift + click", "Select several keys");
+                DrawShortcut($"{mod} + A", "Select all listed keys");
             }
             EditorGUILayout.EndVertical();
             GUILayout.FlexibleSpace();
@@ -1242,6 +1268,8 @@ namespace PicoShot.Localization.Editor.Tabs
             int total = Data.Keys.Count;
             int shown = Data.GetFilteredKeys().Count;
             string text = shown == total ? $"{total} keys" : $"{shown} / {total} keys";
+            if (IsMultiSelect)
+                text += $" · {_selection.Count} selected";
             if (parts.Count > 0)
                 text += " · " + string.Join(" · ", parts);
 
@@ -1443,11 +1471,13 @@ namespace PicoShot.Localization.Editor.Tabs
             {
                 case KeyCode.UpArrow:
                 case KeyCode.DownArrow:
-                    return HandleArrowKey(evt, evt.keyCode == KeyCode.UpArrow ? -1 : 1, evt.alt || action);
+                    return HandleArrowKey(evt, evt.keyCode == KeyCode.UpArrow ? -1 : 1, evt.alt || action, evt.shift);
 
                 case KeyCode.Escape:
                     if (_showNewKeyForm)
                         CloseNewKeyForm();
+                    else if (IsMultiSelect)
+                        CollapseSelection();
                     else if (!string.IsNullOrEmpty(Data.SelectedKey))
                         Data.SelectedKey = null;
                     else
@@ -1469,12 +1499,23 @@ namespace PicoShot.Localization.Editor.Tabs
                     return true;
 
                 case KeyCode.T when action:
-                    TranslateMissing(key, null);
+                    if (IsMultiSelect)
+                        TranslateSelection(GetTranslatableKeys(GetSelectedKeys()));
+                    else
+                        TranslateMissing(key, null);
                     evt.Use();
                     return true;
 
                 case KeyCode.C when action:
-                    CopyToClipboard(key, $"Copied '{key}'");
+                    if (IsMultiSelect)
+                    {
+                        var names = GetSelectedKeys();
+                        CopyToClipboard(string.Join("\n", names), $"Copied {names.Count} key names");
+                    }
+                    else
+                    {
+                        CopyToClipboard(key, $"Copied '{key}'");
+                    }
                     evt.Use();
                     return true;
 
@@ -1483,9 +1524,10 @@ namespace PicoShot.Localization.Editor.Tabs
                     if (_pendingDelete)
                         return false;
                     _pendingDelete = true;
+                    var toDelete = GetSelectedKeys();
                     EditorApplication.delayCall += () =>
                     {
-                        ConfirmDeleteKey(key);
+                        ConfirmDeleteKeys(toDelete);
                         _pendingDelete = false;
                     };
                     evt.Use();
@@ -1495,7 +1537,7 @@ namespace PicoShot.Localization.Editor.Tabs
             return false;
         }
 
-        private bool HandleArrowKey(Event evt, int direction, bool reorder)
+        private bool HandleArrowKey(Event evt, int direction, bool reorder, bool extend)
         {
             var filtered = Data.GetFilteredKeys();
             if (filtered.Count == 0)
@@ -1504,11 +1546,24 @@ namespace PicoShot.Localization.Editor.Tabs
             int index = string.IsNullOrEmpty(Data.SelectedKey) ? -1 : IndexOf(filtered, Data.SelectedKey);
 
             if (index < 0)
-                Data.SelectedKey = filtered[direction > 0 ? 0 : filtered.Count - 1];
+            {
+                SelectKey(filtered[direction > 0 ? 0 : filtered.Count - 1]);
+            }
             else if (reorder)
-                MoveSelectedKey(filtered, index, direction);
+            {
+                if (IsMultiSelect)
+                    Editor.ShowNotification(new GUIContent("Select a single key to reorder it"));
+                else
+                    MoveSelectedKey(filtered, index, direction);
+            }
             else
-                Data.SelectedKey = filtered[Mathf.Clamp(index + direction, 0, filtered.Count - 1)];
+            {
+                string target = filtered[Mathf.Clamp(index + direction, 0, filtered.Count - 1)];
+                if (extend)
+                    SelectRange(_anchor ?? Data.SelectedKey, target, additive: false);
+                else
+                    SelectKey(target);
+            }
 
             AutoScrollToSelectedKey();
             evt.Use();
