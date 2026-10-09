@@ -551,63 +551,57 @@ namespace PicoShot.Localization
                 return;
             }
 
-            // Filter out empty options
-            options = options.Where(opt => !string.IsNullOrEmpty(opt)).ToArray();
-
-            // Apply size limit
-            if (arraySizeLimit > 0 && options.Length > arraySizeLimit)
-            {
-                options = options.Take(arraySizeLimit).ToArray();
-            }
-
-            // Apply text processors
+            var labels = new List<string>(options.Length);
             for (int i = 0; i < options.Length; i++)
             {
-                options[i] = ApplyProcessors(options[i]);
+                if (arraySizeLimit > 0 && labels.Count >= arraySizeLimit) break;
+                if (string.IsNullOrEmpty(options[i])) continue;
+                labels.Add(ApplyProcessors(options[i]));
             }
 
             if (_tmpDropdown != null)
             {
-                UpdateTMPDropdown(_tmpDropdown, options);
+                UpdateTMPDropdown(_tmpDropdown, labels);
             }
             else if (_legacyDropdown != null)
             {
-                UpdateLegacyDropdown(_legacyDropdown, options);
+                UpdateLegacyDropdown(_legacyDropdown, labels);
             }
         }
 
-        private static void UpdateTMPDropdown(TMP_Dropdown dropdown, string[] options)
+        private static void UpdateTMPDropdown(TMP_Dropdown dropdown, List<string> labels)
         {
             int selectedValue = dropdown.value;
             dropdown.ClearOptions();
-            dropdown.AddOptions(options.ToList());
+            dropdown.AddOptions(labels);
 
-            // Restore selection if valid, otherwise select first
-            if (selectedValue < options.Length)
+            if (selectedValue < labels.Count)
             {
-                dropdown.value = selectedValue;
+                dropdown.SetValueWithoutNotify(selectedValue);
             }
-            else if (options.Length > 0)
+            else
             {
-                dropdown.value = 0;
+                dropdown.SetValueWithoutNotify(0);
+                if (selectedValue != 0) dropdown.onValueChanged.Invoke(0);
             }
 
             dropdown.RefreshShownValue();
         }
 
-        private static void UpdateLegacyDropdown(Dropdown dropdown, string[] options)
+        private static void UpdateLegacyDropdown(Dropdown dropdown, List<string> labels)
         {
             int selectedValue = dropdown.value;
             dropdown.ClearOptions();
-            dropdown.AddOptions(options.ToList());
+            dropdown.AddOptions(labels);
 
-            if (selectedValue < options.Length)
+            if (selectedValue < labels.Count)
             {
-                dropdown.value = selectedValue;
+                dropdown.SetValueWithoutNotify(selectedValue);
             }
-            else if (options.Length > 0)
+            else
             {
-                dropdown.value = 0;
+                dropdown.SetValueWithoutNotify(0);
+                if (selectedValue != 0) dropdown.onValueChanged.Invoke(0);
             }
 
             dropdown.RefreshShownValue();
@@ -665,10 +659,10 @@ namespace PicoShot.Localization
 
             string current = LocalizationManager.CurrentLanguage;
             int currentIndex = languages.FindIndex(l => string.Equals(l, current, System.StringComparison.OrdinalIgnoreCase));
-            
+
             int nextIndex = (currentIndex + 1) % languages.Count;
             LocalizationManager.SetLanguage(languages[nextIndex]);
-            
+
             if (!Application.isPlaying)
             {
                 UpdateText();
