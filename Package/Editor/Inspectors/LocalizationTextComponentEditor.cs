@@ -151,7 +151,7 @@ namespace PicoShot.Localization.Editor.Inspectors
 
                         Repaint();
                     }
-                });
+                }, "Select View");
             }
             EditorGUILayout.EndHorizontal();
 
@@ -200,7 +200,7 @@ namespace PicoShot.Localization.Editor.Inspectors
                             EditorUtility.SetDirty(component);
                         }
                     }
-                });
+                }, "Select Key");
             }
             EditorGUILayout.EndHorizontal();
 

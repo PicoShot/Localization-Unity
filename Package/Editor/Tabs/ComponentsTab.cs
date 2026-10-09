@@ -1096,10 +1096,12 @@ namespace PicoShot.Localization.Editor.Tabs
                 Editor.Repaint();
             }
 
+            string Preview(int i) => Data.GetPreviewText(keys[i]);
+
             if (centered)
-                LocalizationSearchablePopup.ShowCenteredOnWindow(WindowPosition, keys, selected, OnPicked);
+                LocalizationSearchablePopup.ShowCenteredOnWindow(WindowPosition, keys, selected, OnPicked, "Select Key", Preview);
             else
-                LocalizationSearchablePopup.Show(rect, keys, selected, OnPicked);
+                LocalizationSearchablePopup.Show(rect, keys, selected, OnPicked, "Select Key", Preview);
         }
 
         private static string UndoShortcut => Application.platform == RuntimePlatform.OSXEditor ? "Cmd+Z" : "Ctrl+Z";

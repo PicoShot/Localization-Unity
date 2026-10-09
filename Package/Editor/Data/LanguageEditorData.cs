@@ -539,6 +539,23 @@ namespace PicoShot.Localization.Editor.Data
         }
 
         /// <summary>
+        /// One-line preview of a key's text (default language first), for pickers and lists.
+        /// Array keys show their elements joined with commas.
+        /// </summary>
+        public string GetPreviewText(string key, int maxLength = 80)
+        {
+            string text = GetFirstValue(key) switch
+            {
+                string str => str,
+                IEnumerable<string> list => string.Join(", ", list.Where(item => !string.IsNullOrEmpty(item))),
+                _ => ""
+            };
+
+            text = text.Replace('\n', ' ').Trim();
+            return text.Length > maxLength ? text.Substring(0, maxLength) + "…" : text;
+        }
+
+        /// <summary>
         /// Gets the first value from a key data dictionary.
         /// </summary>
         public static object GetFirstValue(Dictionary<string, object> keyData)

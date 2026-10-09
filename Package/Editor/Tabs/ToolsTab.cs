@@ -728,7 +728,7 @@ namespace PicoShot.Localization.Editor.Tabs
                         Data.TestKey = keys[i];
                         GUIUtility.keyboardControl = 0;
                         Editor.Repaint();
-                    });
+                    }, "Select Key", i => Data.GetPreviewText(keys[i]));
                 }
             }
             EditorGUILayout.EndHorizontal();
