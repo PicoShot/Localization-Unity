@@ -97,7 +97,7 @@ namespace PicoShot.Localization
             return applyModifiers(Type switch
             {
                 NodeType.LocalizedText => LocalizationManager.GetLogicalText(Value, arguments),
-                NodeType.FormattedText => string.Format(Value, arguments),
+                NodeType.FormattedText => LocalizationManager.SafeFormat(Value, arguments),
                 _ => throw new NotImplementedException()
             });
         }

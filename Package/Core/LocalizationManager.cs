@@ -623,22 +623,7 @@ namespace PicoShot.Localization
 
             string text = GetRawText(key);
 
-            if (args != null && args.Length > 0)
-            {
-                var resolvedArgs = new string[args.Length];
-                for (int i = 0; i < args.Length; i++)
-                {
-                    resolvedArgs[i] = args[i] switch
-                    {
-                        Key k => GetRawText(k.Value),
-                        null => string.Empty,
-                        string s => s,
-                        _ => args[i].ToString()
-                    };
-                }
-
-                text = string.Format(text, resolvedArgs);
-            }
+            text = FormatText(text, args);
 
             return ApplyRtl(text);
         }
@@ -650,21 +635,7 @@ namespace PicoShot.Localization
 
             string text = GetRawText(key);
 
-            if (args != null && args.Length > 0)
-            {
-                var resolvedArgs = new string[args.Length];
-                for (int i = 0; i < args.Length; i++)
-                {
-                    resolvedArgs[i] = args[i] switch
-                    {
-                        Key k => GetRawText(k.Value),
-                        null => string.Empty,
-                        string s => s,
-                        _ => args[i].ToString()
-                    };
-                }
-                text = string.Format(text, resolvedArgs);
-            }
+            text = FormatText(text, args);
 
             // We do NOT shape or reverse the text here. 
             // We want the pure, raw, unshaped text so TMP can calculate line breaks accurately.
@@ -706,23 +677,53 @@ namespace PicoShot.Localization
 
             string text = GetRawText(keyHash);
 
-            if (args != null && args.Length > 0)
-            {
-                var resolvedArgs = new string[args.Length];
-                for (int i = 0; i < args.Length; i++)
-                {
-                    resolvedArgs[i] = args[i] switch
-                    {
-                        Key k => GetRawText(k.Value),
-                        null => string.Empty,
-                        string s => s,
-                        _ => args[i].ToString()
-                    };
-                }
-                text = string.Format(text, resolvedArgs);
-            }
+            text = FormatText(text, args);
 
             return ApplyRtl(text);
+        }
+
+        /// <summary>
+        /// Formats text with arguments: Key values are translated, strings are literals,
+        /// null becomes empty and anything else uses ToString().
+        /// </summary>
+        private static string FormatText(string format, object[] args)
+        {
+            if (args == null || args.Length == 0)
+                return format;
+
+            var resolvedArgs = new string[args.Length];
+            for (int i = 0; i < args.Length; i++)
+            {
+                resolvedArgs[i] = args[i] switch
+                {
+                    Key k => k.Value != null ? GetRawText(k.Value) : GetRawText(k.Hash),
+                    null => string.Empty,
+                    string s => s,
+                    _ => args[i].ToString()
+                };
+            }
+
+            return SafeFormat(format, resolvedArgs);
+        }
+
+        /// <summary>
+        /// string.Format that never throws: translations are data, and a translator writing
+        /// Returns the unformatted text and reports the problem instead.
+        /// </summary>
+        internal static string SafeFormat(string format, object[] args)
+        {
+            if (format == null)
+                return string.Empty;
+
+            try
+            {
+                return string.Format(format, args);
+            }
+            catch (FormatException ex)
+            {
+                Debug.LogError($"[LocalizationManager] Invalid format string \"{format}\" for {args?.Length ?? 0} argument(s): {ex.Message}");
+                return format;
+            }
         }
 
         /// <summary>
@@ -762,19 +763,16 @@ namespace PicoShot.Localization
 
             string text = GetRawText(key);
 
-            //* Rytiex
             if (args != null && args.Length > 0)
             {
-                string[] keyArgs = args;
+                var keyArgs = new string[args.Length];
                 for (int i = 0; i < args.Length; i++)
                 {
-                    string argKey = args[i];
-                    keyArgs[i] = GetRawText(argKey);
+                    keyArgs[i] = GetRawText(args[i]);
                 }
 
-                text = string.Format(text, keyArgs);
+                text = SafeFormat(text, keyArgs);
             }
-            //*
 
             return ApplyRtl(text);
         }
