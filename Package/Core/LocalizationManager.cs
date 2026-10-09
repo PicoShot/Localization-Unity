@@ -43,12 +43,14 @@ namespace PicoShot.Localization
 
         /// <summary>
         /// Gets the path to the locales directory.
+        /// Editor: project root. Windows/Linux players: next to the executable.
+        /// Other players: StreamingAssets.
         /// </summary>
         public static string LanguagesPath
         {
             get
             {
-#if UNITY_STANDALONE || UNITY_EDITOR
+#if UNITY_EDITOR || UNITY_STANDALONE_WIN || UNITY_STANDALONE_LINUX
                 string projectPath = Path.GetDirectoryName(Application.dataPath);
                 if (projectPath != null)
                 {
@@ -586,7 +588,7 @@ namespace PicoShot.Localization
         {
             if (string.IsNullOrEmpty(key)) return string.Empty;
             if (!_isInitialized) Initialize();
-            
+
             string text = GetRawText(key);
 
             if (args != null && args.Length > 0)
