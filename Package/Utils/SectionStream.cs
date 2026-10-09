@@ -22,9 +22,11 @@ namespace PicoShot.Localization.Utils
 
         public override int Read(byte[] buffer, int offset, int count)
         {
-            baseStream.Position = start + position;
-
             int toRead = (int)Math.Min(count, length - position);
+            if (toRead <= 0)
+                return 0;
+
+            baseStream.Position = start + position;
             int read = baseStream.Read(buffer, offset, toRead);
 
             position += read;
@@ -33,9 +35,11 @@ namespace PicoShot.Localization.Utils
 
         public override void Write(byte[] buffer, int offset, int count)
         {
-            baseStream.Position = start + position;
-
             int toWrite = (int)Math.Min(count, length - position);
+            if (toWrite <= 0)
+                return;
+
+            baseStream.Position = start + position;
             baseStream.Write(buffer, offset, toWrite);
 
             position += toWrite;
@@ -69,4 +73,4 @@ namespace PicoShot.Localization.Utils
         public override void Flush() => baseStream.Flush();
         public override void SetLength(long value) => throw new NotSupportedException();
     }
-}
+}

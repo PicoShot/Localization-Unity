@@ -29,46 +29,94 @@ namespace PicoShot.Localization.Bloc
                 return false;
 
             var header = ReadHeader(reader);
-            languageCode = Marshal.PtrToStringAnsi((nint)header.languageCode);
+            languageCode = ReadLanguageCode(ref header);
 
-            if (header.contentSize < 0 || header.contentSize > 100_000_000) // 100MB sanity check
+            if (header.contentSize > MaxContentSize)
                 return false;
 
-            Crc32 computedCrc = new Crc32();
-            computedCrc.Reset();
-
-            var contentData = ArrayPool<byte>.Shared.Rent((int)header.contentSize);
-            var contentSpan = contentData.AsSpan(0, (int)header.contentSize);
+            int contentSize = (int)header.contentSize;
+            var contentData = ArrayPool<byte>.Shared.Rent(contentSize);
             try
             {
-                if ((header.flags & BlocFlags.IsCompressed) != 0)
-                {
-                    using var contentSection = new SectionStream(reader.BaseStream, CONTENT_START, reader.BaseStream.Length - (CONTENT_START + FOOTER_SIZE));
-                    using var deflateStream = new DeflateStream(contentSection, CompressionMode.Decompress);
+                if (!ReadContent(reader, header, contentData, contentSize))
+                    return false;
 
-                    int totalRead = 0;
-                    while (totalRead < header.contentSize)
-                    {
-                        int r = deflateStream.Read(contentData, totalRead, (int)header.contentSize - totalRead);
-
-                        if (r == 0)
-                            break;
-
-                        totalRead += r;
-                    }
-                }
-                else
-                    reader.Read(contentSpan);
+                uint storedCrc = ReadFooter(reader).contentCRC;
+                return storedCrc == ComputeCrc32(contentData.AsSpan(0, contentSize));
             }
             finally
             {
                 ArrayPool<byte>.Shared.Return(contentData);
             }
+        }
 
-            uint storedCrc = reader.ReadUInt32();
-            computedCrc.Append(contentSpan);
+        /// <summary>
+        /// Reads only the header: format checks and the language code, without decompressing
+        /// or checksumming the content. The full check happens when the file is loaded.
+        /// </summary>
+        public static bool ReadInfo(BinaryReader reader, out string languageCode)
+        {
+            languageCode = null;
 
-            return storedCrc == computedCrc.GetCurrentHashAsUInt32();
+            if (reader.BaseStream.Length < (FILE_MIN_SIZE + HEADER_SIZE + FOOTER_SIZE))
+                return false;
+
+            var header = ReadHeader(reader);
+            languageCode = ReadLanguageCode(ref header);
+            return header.contentSize <= MaxContentSize;
+        }
+
+        private const uint MaxContentSize = 100_000_000; // 100MB sanity check
+
+        private static string ReadLanguageCode(ref Header header)
+        {
+            fixed (byte* code = header.languageCode)
+            {
+                int length = 0;
+                while (length < LANGUAGE_CODE_SIZE && code[length] != 0) length++;
+                return Encoding.ASCII.GetString(code, length);
+            }
+        }
+
+        /// <summary>
+        /// Reads (and decompresses if needed) exactly <paramref name="contentSize"/> bytes of content,
+        /// then positions the reader on the footer.
+        /// </summary>
+        private static bool ReadContent(BinaryReader reader, Header header, byte[] buffer, int contentSize)
+        {
+            Stream baseStream = reader.BaseStream;
+            long footerPosition = baseStream.Length - FOOTER_SIZE;
+            int totalRead = 0;
+
+            if ((header.flags & BlocFlags.IsCompressed) != 0)
+            {
+                using var contentSection = new SectionStream(baseStream, CONTENT_START, footerPosition - CONTENT_START);
+                using var deflateStream = new DeflateStream(contentSection, CompressionMode.Decompress);
+
+                while (totalRead < contentSize)
+                {
+                    int r = deflateStream.Read(buffer, totalRead, contentSize - totalRead);
+                    if (r == 0)
+                        break;
+
+                    totalRead += r;
+                }
+            }
+            else
+            {
+                baseStream.Position = CONTENT_START;
+                while (totalRead < contentSize)
+                {
+                    int r = baseStream.Read(buffer, totalRead, contentSize - totalRead);
+                    if (r == 0)
+                        break;
+
+                    totalRead += r;
+                }
+            }
+
+            baseStream.Position = footerPosition;
+            return totalRead == contentSize;
         }
         public static void Serialize(BinaryWriter writer, in IBlocEntry[] entries, string languageCode, CompressionLevel compressionLevel)
         {
@@ -76,6 +124,9 @@ namespace PicoShot.Localization.Bloc
             {
                 flags = compressionLevel != CompressionLevel.NoCompression ? BlocFlags.IsCompressed : 0,
             };
+
+            if (string.IsNullOrEmpty(languageCode) || Encoding.ASCII.GetByteCount(languageCode) > LANGUAGE_CODE_SIZE)
+                throw new ArgumentException($"Language code must be 1-{LANGUAGE_CODE_SIZE} ASCII characters: '{languageCode}'", nameof(languageCode));
 
             Encoding.ASCII.GetBytes(languageCode, new Span<byte>(header.languageCode, LANGUAGE_CODE_SIZE));
 
@@ -213,43 +264,21 @@ namespace PicoShot.Localization.Bloc
             };
 
             var header = ReadHeader(reader);
-            info.LanguageCode = Marshal.PtrToStringAnsi((nint)header.languageCode);
+            info.LanguageCode = ReadLanguageCode(ref header);
 
-            if (header.contentSize < 0 || header.contentSize > 100_000_000) // 100MB sanity check
+            if (header.contentSize > MaxContentSize)
                 throw new InvalidDataException("Invalid content size");
 
-            int dataSize = (int)reader.BaseStream.Length - CONTENT_START - FOOTER_SIZE;
-
-            var contentData = ArrayPool<byte>.Shared.Rent((int)header.contentSize);
-            var contentSpan = contentData.AsSpan(0, (int)header.contentSize);
+            int contentSize = (int)header.contentSize;
+            var contentData = ArrayPool<byte>.Shared.Rent(contentSize);
+            var contentSpan = contentData.AsSpan(0, contentSize);
             try
             {
-                if ((header.flags & BlocFlags.IsCompressed) != 0)
-                {
-                    using var contentSection = new SectionStream(reader.BaseStream, CONTENT_START, dataSize);
-                    using var deflateStream = new DeflateStream(contentSection, CompressionMode.Decompress);
-
-                    int totalRead = 0;
-                    while (totalRead < header.contentSize)
-                    {
-                        int r = deflateStream.Read(contentData, totalRead, (int)header.contentSize - totalRead);
-
-                        if (r == 0)
-                            break;
-
-                        totalRead += r;
-                    }
-                }
-                else
-                    reader.Read(contentSpan);
-
-                Crc32 computedCrc = new Crc32();
-                computedCrc.Reset();
+                if (!ReadContent(reader, header, contentData, contentSize))
+                    throw new InvalidDataException("File truncated");
 
                 var footer = ReadFooter(reader);
-                computedCrc.Append(contentSpan);
-
-                if (footer.contentCRC != computedCrc.GetCurrentHashAsUInt32())
+                if (footer.contentCRC != ComputeCrc32(contentSpan))
                     throw new FileLoadException("File damaged (CRC mismatch)");
 
                 using var contentStream = new MemoryStream(contentData, 0, contentSpan.Length);
@@ -260,7 +289,7 @@ namespace PicoShot.Localization.Bloc
                 for (int i = 0; i < header.strings.count; i++)
                 {
                     uint length = ReadVarInt(contentReader);
-                    if (length > 100000) // Sanity check
+                    if (length > contentSize - contentStream.Position)
                         throw new InvalidDataException($"Invalid string length: {length}");
 
                     byte[] bytes = contentReader.ReadBytes((int)length);

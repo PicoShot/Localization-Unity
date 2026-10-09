@@ -26,20 +26,51 @@ namespace PicoShot.Localization.Bloc
                 return false;
 
             var header = ReadHeader(reader);
-
-            int langLen = 0;
-            while (langLen < LANGUAGE_CODE_SIZE && header.languageCode[langLen] != 0) langLen++;
-            languageCode = Encoding.ASCII.GetString(header.languageCode, langLen);
+            languageCode = ReadLanguageCode(ref header);
 
             if ((header.flags & BlocFlags.IsCompressed) != 0)
                 return true;
 
-            var data = reader.ReadBytes((int)reader.BaseStream.Length - 4);
+            int dataSize = (int)(reader.BaseStream.Length - reader.BaseStream.Position - 4);
+            if (dataSize < 0)
+                return false;
+
+            var data = reader.ReadBytes(dataSize);
 
             uint storedCrc = reader.ReadUInt32();
             uint computedCrc = ComputeCrc32(data);
 
-            return storedCrc == computedCrc;
+            return IsCrcMatch(storedCrc, computedCrc);
+        }
+
+        /// <summary>
+        /// Reads only the header: format checks and the language code.
+        /// </summary>
+        public static bool ReadInfo(BinaryReader reader, out string languageCode)
+        {
+            languageCode = null;
+
+            if (reader.BaseStream.Length < (FILE_MIN_SIZE + HEADER_SIZE + 4))
+                return false;
+
+            var header = ReadHeader(reader);
+            languageCode = ReadLanguageCode(ref header);
+            return true;
+        }
+
+        private static bool IsCrcMatch(uint storedCrc, uint computedCrc)
+        {
+            return storedCrc == computedCrc || storedCrc == ~computedCrc;
+        }
+
+        private static string ReadLanguageCode(ref Header header)
+        {
+            fixed (byte* code = header.languageCode)
+            {
+                int length = 0;
+                while (length < LANGUAGE_CODE_SIZE && code[length] != 0) length++;
+                return Encoding.ASCII.GetString(code, length);
+            }
         }
         public static void Serialize(BinaryWriter writer, in IBlocEntry[] entries, string languageCode, CompressionLevel compressionLevel)
         {
@@ -170,10 +201,11 @@ namespace PicoShot.Localization.Bloc
             };
 
             var header = ReadHeader(reader);
-            info.LanguageCode = Marshal.PtrToStringAnsi((nint)header.languageCode);
+            info.LanguageCode = ReadLanguageCode(ref header);
 
+            bool isCompressed = (header.flags & BlocFlags.IsCompressed) != 0;
             byte[] uncompressedData = null;
-            if ((header.flags & BlocFlags.IsCompressed) != 0)
+            if (isCompressed)
             {
                 int uncompressedSize = (int)header.stringPoolOffset;
                 int compressedDataLength = (int)reader.BaseStream.Length - (MAGIC_AND_VERSION_SIZE + HEADER_SIZE);
@@ -203,18 +235,30 @@ namespace PicoShot.Localization.Bloc
                 var storedCrc = reader.ReadUInt32();
                 uint contentCrc = ComputeCrc32(uncompressedData);
 
-                if (storedCrc != contentCrc)
+                if (!IsCrcMatch(storedCrc, contentCrc))
                     throw new FileLoadException("File damaged (CRC mismatch)");
             }
 
             using var contentStream = new MemoryStream(uncompressedData);
             using var contentReader = new BinaryReader(contentStream);
 
-            contentStream.Position = 20;
+            uint entryCount;
+            uint stringCount;
+            uint stringPoolOffset;
 
-            uint entryCount = contentReader.ReadUInt32();
-            uint stringCount = contentReader.ReadUInt32();
-            uint stringPoolOffset = contentReader.ReadUInt32();
+            if (isCompressed)
+            {
+                contentStream.Position = 20;
+                entryCount = contentReader.ReadUInt32();
+                stringCount = contentReader.ReadUInt32();
+                stringPoolOffset = contentReader.ReadUInt32();
+            }
+            else
+            {
+                entryCount = header.entryCount;
+                stringCount = header.stringCount;
+                stringPoolOffset = header.stringPoolOffset;
+            }
 
             contentStream.Position = stringPoolOffset;
             var stringPool = ReadStringPool(contentReader, stringCount);
@@ -267,7 +311,7 @@ namespace PicoShot.Localization.Bloc
             for (int i = 0; i < count; i++)
             {
                 uint length = ReadVarInt(reader);
-                if (length > 100000) // Sanity check
+                if (length > reader.BaseStream.Length - reader.BaseStream.Position)
                     throw new InvalidDataException($"Invalid string length: {length}");
 
                 byte[] bytes = reader.ReadBytes((int)length);
