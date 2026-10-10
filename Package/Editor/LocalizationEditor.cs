@@ -43,24 +43,7 @@ namespace PicoShot.Localization
         public static void OpenWindow()
         {
             GetWindow<LocalizationEditor>("Localization");
-        }
-
-        /// <summary>
-        /// Opens the editor on a tab by its display name ("Localization", "Keys", "Components", "Tools", "Settings").
-        /// </summary>
-        public static void OpenOnTab(string tabName)
-        {
-            var window = GetWindow<LocalizationEditor>("Localization");
-            foreach (var tab in TabOrder)
-            {
-                if (string.Equals(GetTabDisplayName(tab), tabName, StringComparison.OrdinalIgnoreCase))
-                {
-                    window.SwitchToTab(tab);
-                    break;
-                }
-            }
-            window.Focus();
-        }
+        }   
 
         private void OnEnable()
         {
@@ -211,8 +194,6 @@ namespace PicoShot.Localization
                 string fullPath = Path.GetFullPath(path).Replace('\\', '/');
                 Application.OpenURL((fullPath.StartsWith("/") ? "file://" : "file:///") + fullPath);
             });
-            menu.AddSeparator("");
-            menu.AddItem(new GUIContent("Welcome Tour"), false, LocalizationWelcomeWindow.OpenFromMenu);
             menu.DropDown(rect);
         }
 
